@@ -201,6 +201,86 @@ Request fields:
 | `user_query` | The user's original query (required) |
 | `session_id` | Session identifier for multi-turn dual-history tracking (optional) |
 
+## OpenClaw Integration Guide
+
+If you want to use Zipsa as the privacy front-door for OpenClaw, connect OpenClaw to Zipsa's OpenAI-compatible endpoint instead of sending raw prompts directly to an external model.
+
+### Architecture
+
+```text
+OpenClaw
+  -> Zipsa (/v1/chat/completions)
+  -> local reformulation + routing
+  -> external knowledge provider only when needed
+  -> final answer returned back to OpenClaw
+```
+
+### Step 1: Start Zipsa
+
+Make sure Zipsa is running locally:
+
+```bash
+docker-compose up -d
+curl http://localhost:8000/health
+```
+
+### Step 2: Point OpenClaw to Zipsa
+
+In any OpenClaw component that supports an OpenAI-style base URL, use:
+
+```env
+OPENAI_BASE_URL=http://localhost:8000/v1
+OPENAI_API_KEY=zipsa-key
+OPENAI_MODEL=zipsa
+```
+
+If the integration field is named differently, the values still map the same way:
+
+- base URL: `http://localhost:8000/v1`
+- API key: any non-empty string, or the Bearer token configured in Zipsa
+- model: `zipsa`
+
+### Step 3: Send the original query normally
+
+OpenClaw should send the full original prompt. Zipsa handles the privacy-preserving reformulation and routing internally.
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8000/v1",
+    api_key="zipsa-key",
+)
+
+response = client.chat.completions.create(
+    model="zipsa",
+    messages=[
+        {
+            "role": "user",
+            "content": "Jane Smith (SSN 123-45-6789) needs help with her diabetes treatment."
+        }
+    ],
+)
+```
+
+### Step 4: Preserve session continuity
+
+For multi-turn OpenClaw workflows, pass a stable `session_id` so Zipsa can maintain raw and reformulated histories separately:
+
+```python
+response = client.chat.completions.create(
+    model="zipsa",
+    messages=[{"role": "user", "content": "Her eGFR dropped to 45, what now?"}],
+    extra_body={"session_id": "openclaw-case-001"},
+)
+```
+
+### When this is useful
+
+- You want OpenClaw to keep using an OpenAI-style client without code changes in the rest of the pipeline.
+- You want patient or case-specific prompts to stay local unless external knowledge is actually needed.
+- You want Zipsa to act as a privacy boundary between OpenClaw and Claude, Gemini, or OpenAI.
+
 ## ⚙️ Configuration
 
 | Variable | Default | Description |
