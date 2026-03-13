@@ -1,9 +1,23 @@
 # Zipsa
 
+**A local-first privacy gateway for OpenAI-compatible apps and OpenClaw workflows.**
+
 ![Privacy First](https://img.shields.io/badge/privacy-local--first-1f6feb)
 ![OpenAI Compatible](https://img.shields.io/badge/api-openai--compatible-0a7f5a)
 ![Ollama](https://img.shields.io/badge/local%20llm-Ollama-222222)
 ![Hybrid Routing](https://img.shields.io/badge/routing-local%20%7C%20hybrid-b35c00)
+
+> [!WARNING]
+> Zipsa is experimental software. Routing behavior, prompts, APIs, and configuration may change without notice as the privacy architecture is validated.
+> Use it for evaluation and iteration, not as a stable production release.
+
+Zipsa sits between your application and external LLMs. It decides when a request can stay fully local, when external knowledge is actually needed, and how to rewrite the request so private context does not leave your environment.
+
+**Works especially well as a privacy front-door for OpenClaw** via Zipsa's OpenAI-compatible endpoint.
+
+- New here? Start with [How It Works](#how-it-works)
+- Using OpenClaw? Jump to [OpenClaw Integration Guide](#openclaw-integration-guide)
+- Want to try it quickly? See [Getting Started](#-getting-started)
 
 Cloud AI models are powerful — but sending patient records, employee data, or business documents to an external API creates real privacy risks.
 

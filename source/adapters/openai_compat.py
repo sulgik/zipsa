@@ -71,6 +71,19 @@ def _sse_stream(final_answer: str, model_id: str) -> StreamingResponse:
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
+@router.get("/v1/models")
+async def list_models():
+    return {
+        "object": "list",
+        "data": [{
+            "id": "zipsa",
+            "object": "model",
+            "created": 1700000000,
+            "owned_by": "zipsa",
+        }],
+    }
+
+
 @router.post("/v1/chat/completions")
 async def openai_chat_completions(
     raw: Request,
