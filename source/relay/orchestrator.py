@@ -13,6 +13,7 @@ from source.relay.providers.openai_provider import OpenAIProvider
 from source.relay.providers.local_provider import LocalProvider
 
 PROVIDERS = {
+    "anthropic": ClaudeProvider,
     "claude": ClaudeProvider,
     "gemini": GeminiProvider,
     "openai": OpenAIProvider,

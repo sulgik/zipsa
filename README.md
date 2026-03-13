@@ -11,7 +11,7 @@
 > Zipsa is experimental software. Routing behavior, prompts, APIs, and configuration may change without notice as the privacy architecture is validated.
 > Use it for evaluation and iteration, not as a stable production release.
 
-Zipsa sits between your app and external LLMs. It keeps sensitive context local when possible, decides when outside knowledge is actually needed, and reformulates prompts before anything is sent to a cloud model.
+Zipsa sits between your app and external LLMs. It keeps sensitive context local when possible, decides whether outside knowledge is actually needed, and reformulates prompts only when something is sent to a cloud model.
 
 **What it gives you**
 
@@ -33,9 +33,9 @@ Cloud AI models are powerful, but sending patient records, employee data, or bus
 
 ```mermaid
 flowchart LR
-    U[User Query<br/>Private Context] --> L[Local LLM via Ollama<br/>Route + Reformulate]
-    L -->|route=local| A[Final Answer<br/>Stays Local]
-    L -->|route=hybrid| S[Reformatted Query]
+    U[User Query<br/>Private Context] --> L[Local LLM via Ollama<br/>Plan Route]
+    L -->|local-only| A[Final Answer<br/>Stays Local]
+    L -->|hybrid| S[Reformulated Query]
     S --> E[External Model<br/>Claude / Gemini / OpenAI]
     E --> X[Knowledge Only]
     X --> L
@@ -53,10 +53,10 @@ flowchart LR
 ```text
 User query (original, with private context)
   │
-  ├─ Stage 1: Local LLM reformulates + routes
-  │     Rewrites query into a depersonalized knowledge request
-  │     (names → categories, institutions → types, events → descriptions)
-  │     Decides: route="hybrid" (external needed) or route="local" (not needed)
+  ├─ Stage 1: Local planning
+  │     Decides whether the request should stay local
+  │     or use hybrid execution with an external query
+  │     Output: route="hybrid" or route="local"
   │
   ├─ Stage 2: Parallel inference  [hybrid only]
   │     Local LLM  ← raw_history + original query   (full context, decision-maker)
@@ -91,7 +91,7 @@ Session state
     └── Turn 2 user:  (← reformulated from current raw turn)
 ```
 
-On each new turn, the reformulator receives the **sanitized history as context** (so it understands the ongoing conversation without re-exposing prior PII) and reformulates only the **current raw message**. The external provider receives a proper messages array — sanitized history plus the new reformulated turn — never the raw originals.
+On each new turn, the local planning step receives the **sanitized history as context** (so it understands the ongoing conversation without re-exposing prior PII). When it selects hybrid execution, it reformulates the **current raw message** into a depersonalized version. The external provider receives a proper messages array — sanitized history plus the new reformulated turn — never the raw originals.
 
 ## ✨ Key Features
 
@@ -109,7 +109,7 @@ On each new turn, the reformulator receives the **sanitized history as context**
 
 - Docker and Docker Compose
 - Ollama installed and running locally (`http://localhost:11434`)
-- A local model pulled in Ollama that matches `LOCAL_MODEL` (default: `qwen3.5`)
+- A local model pulled in Ollama that matches `LOCAL_MODEL` (default: `qwen3.5:9b`)
 - An API key for your chosen external provider
 
 ### Docker Setup
@@ -130,15 +130,15 @@ On each new turn, the reformulator receives the **sanitized history as context**
    Edit `.env`:
 
    ```env
-   LOCAL_MODEL=qwen3.5
-   EXTERNAL_PROVIDER=claude
+   LOCAL_MODEL=qwen3.5:9b
+   EXTERNAL_PROVIDER=anthropic
    ANTHROPIC_API_KEY=your-key
    ```
 
    Ensure the local Ollama model exists before starting:
 
    ```bash
-   ollama pull qwen3.5
+   ollama pull qwen3.5:9b
    ```
 
 3. **Start**
@@ -157,7 +157,7 @@ On each new turn, the reformulator receives the **sanitized history as context**
 
 ### Local (Native) Setup
 
-1. Install [Ollama](https://ollama.com/), start it with `ollama serve`, and pull a model: `ollama pull qwen3.5`
+1. Install [Ollama](https://ollama.com/), start it with `ollama serve`, and pull a model: `ollama pull qwen3.5:9b`
 2. Install dependencies (Python 3.11+):
 
    ```bash
@@ -200,7 +200,7 @@ response = client.chat.completions.create(
 )
 ```
 
-> A safety footer (`🔒 Zipsa: claude 🛡️sanitized`) is appended to indicate the external provider used.
+> A safety footer (`🔒 Zipsa: anthropic 🛡️sanitized`) is appended to indicate the external provider used.
 
 ### Native `/relay` Endpoint
 
@@ -301,10 +301,10 @@ response = client.chat.completions.create(
 
 | Variable | Default | Description |
 | -------- | ------- | ----------- |
-| `LOCAL_MODEL` | `qwen3.5` | Ollama model for reformulation and synthesis |
+| `LOCAL_MODEL` | `qwen3.5:9b` | Ollama model for reformulation and synthesis |
 | `LOCAL_HOST` | `http://localhost:11434` | Ollama server URL |
-| `EXTERNAL_PROVIDER` | `claude` | External knowledge provider: `claude`, `gemini`, `openai` |
-| `ANTHROPIC_API_KEY` | — | Required if `EXTERNAL_PROVIDER=claude` |
+| `EXTERNAL_PROVIDER` | `anthropic` | External knowledge provider: `anthropic`, `gemini`, `openai` (`claude` is accepted as a legacy alias) |
+| `ANTHROPIC_API_KEY` | — | Required if `EXTERNAL_PROVIDER=anthropic` |
 | `GEMINI_API_KEY` | — | Required if `EXTERNAL_PROVIDER=gemini` |
 | `OPENAI_API_KEY` | — | Required if `EXTERNAL_PROVIDER=openai` |
 | `DEMO_MODE` | `true` | Skip Bearer token auth when `true` |

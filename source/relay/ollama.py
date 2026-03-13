@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 
 class OllamaClient:
     def __init__(self, model: str = None, host: str = None):
-        self.model = model or os.getenv("LOCAL_MODEL", "qwen3.5")
+        self.model = model or os.getenv("LOCAL_MODEL", "qwen3.5:9b")
         self.host = host or os.getenv("LOCAL_HOST", "http://localhost:11434")
 
     async def chat(self, messages: List[Dict[str, str]], temperature: float = 0.5) -> str:
@@ -105,16 +105,16 @@ Return ONLY the rewritten text.
         ]
         return await self.chat(messages, temperature=0.0)
 
-    async def semantic_reformulate(self, text: str, sanitized_context: list = None) -> dict:
+    async def plan_execution(self, text: str, sanitized_context: list = None) -> dict:
         """
-        Reformulate the query for external LLM and decide whether external knowledge is needed.
+        Decide the execution path and, when needed, prepare an external-safe query.
 
-        Returns a dict: {"reformulated": str | None, "route": "hybrid" | "local"}
+        Returns a dict: {"execution_path": "hybrid" | "local", "external_query": str | None}
 
-        route="local"  → skip external call; local LLM handles the query entirely.
-        route="hybrid" → run local (original) + external (reformulated) in parallel.
+        execution_path="local"  → skip external call; local LLM handles the query entirely.
+        execution_path="hybrid" → run local (original) + external (external_query) in parallel.
 
-        sanitized_context: prior turns already reformulated (safe to include as conversation
+        sanitized_context: prior turns already external-safe (safe to include as conversation
         history so the reformulator understands ongoing context without re-exposing PII).
         Format: [{"role": "user"|"assistant", "content": str}, ...]
         """
@@ -188,12 +188,12 @@ Now analyze this query:"""
             if start == -1 or end == 0:
                 raise ValueError("no JSON object found")
             result = _json.loads(clean[start:end])
-            route = result.get("route", "hybrid")
-            if route not in ("hybrid", "local"):
-                route = "hybrid"
-            reformulated = result.get("reformulated") or None
-            return {"route": route, "reformulated": reformulated}
+            execution_path = result.get("route", "hybrid")
+            if execution_path not in ("hybrid", "local"):
+                execution_path = "hybrid"
+            external_query = result.get("reformulated") or None
+            return {"execution_path": execution_path, "external_query": external_query}
         except Exception as e:
-            print(f"[Reformulate Parse Error] {e} | raw={raw[:200]}")
-            # Fallback: treat raw output as reformulated text, go hybrid
-            return {"route": "hybrid", "reformulated": raw or text}
+            print(f"[Planning Parse Error] {e} | raw={raw[:200]}")
+            # Fallback: treat raw output as an external-safe query proposal, go hybrid
+            return {"execution_path": "hybrid", "external_query": raw or text}

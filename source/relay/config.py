@@ -32,7 +32,7 @@ class Settings:
     local_host: str = ""
 
     # External provider (required for hybrid inference)
-    external_provider: str = ""   # claude | gemini | openai
+    external_provider: str = ""   # anthropic | gemini | openai
     claude_model: str = ""
     gemini_model: str = ""
 
@@ -41,9 +41,12 @@ class Settings:
     log_dir: str = ""
 
     def __post_init__(self):
-        self.local_model = self.local_model or os.getenv("LOCAL_MODEL", "qwen3.5")
+        self.local_model = self.local_model or os.getenv("LOCAL_MODEL", "qwen3.5:9b")
         self.local_host = self.local_host or os.getenv("LOCAL_HOST", "http://localhost:11434")
-        self.external_provider = self.external_provider or os.getenv("EXTERNAL_PROVIDER", "claude")
+        external_provider = self.external_provider or os.getenv("EXTERNAL_PROVIDER", "anthropic")
+        if external_provider == "claude":
+            external_provider = "anthropic"
+        self.external_provider = external_provider
         self.claude_model = self.claude_model or os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
         self.gemini_model = self.gemini_model or os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
         self.log_dir = self.log_dir or os.getenv("LOG_DIR", "logs")
