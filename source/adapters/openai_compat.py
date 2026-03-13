@@ -34,6 +34,36 @@ def _extract_latest_user_message(messages: list[dict]) -> str:
     return ""
 
 
+_FOOTER_MARKER = "\n\n---\n🔒 Zipsa:"
+
+
+def _strip_footer(content: str) -> str:
+    idx = content.find(_FOOTER_MARKER)
+    return content[:idx].strip() if idx != -1 else content
+
+
+def _extract_history(messages: list[dict]) -> list[dict]:
+    """Return structured history (all turns before the last user message)."""
+    last_user_idx = -1
+    for i, m in enumerate(messages):
+        if m.get("role") == "user":
+            last_user_idx = i
+
+    history = []
+    for i, m in enumerate(messages):
+        if m.get("role") == "system" or i >= last_user_idx:
+            continue
+        content = m.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+        content = (content or "").strip()
+        if m.get("role") == "assistant":
+            content = _strip_footer(content)
+        if content:
+            history.append({"role": m["role"], "content": content})
+    return history
+
+
 def _make_footer(result: dict) -> str:
     provider = result.get("provider", "?")
     routing = result.get("routing") or {}
@@ -96,11 +126,13 @@ async def openai_chat_completions(
 
     # session_id is an optional custom field for multi-turn context tracking
     session_id = body.get("session_id") or None
+    messages_history = _extract_history(body.get("messages", []))
 
     orchestrator: RelayOrchestrator = raw.app.state.orchestrator
     api_key = creds.credentials if creds else None
     result = await orchestrator.process_request(
-        user_query=user_query, api_key=api_key, session_id=session_id
+        user_query=user_query, api_key=api_key, session_id=session_id,
+        messages_history=messages_history,
     )
 
     final_answer = (result.get("final_answer") or "") + _make_footer(result)

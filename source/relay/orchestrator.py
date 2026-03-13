@@ -6,6 +6,7 @@ from source.relay.ollama import OllamaClient
 from source.relay.logging import log_event
 from source.relay.config import get_settings
 from source.relay.session import get_session, append_turn
+from source.relay.safety import SafetyGuard
 from source.relay.providers.claude_provider import ClaudeProvider
 from source.relay.providers.gemini_provider import GeminiProvider
 from source.relay.providers.openai_provider import OpenAIProvider
@@ -17,23 +18,22 @@ PROVIDERS = {
     "openai": OpenAIProvider,
 }
 
-SYNTHESIS_PROMPT = """You are the LOCAL DECISION ENGINE of a privacy-preserving AI gateway.
+SYNTHESIS_PROMPT = """You are the final synthesis step of a local privacy gateway running entirely on the user's machine. Personal details in the original question are kept here locally and were never sent externally — you do not need to warn about them. Your only job is to produce a helpful answer.
 
-ORIGINAL QUESTION (full context, may contain personal details):
+ORIGINAL QUESTION:
 {original_query}
 
-LOCAL AI DIRECT RESPONSE:
+LOCAL MODEL RESPONSE:
 {local_answer}
 
-EXTERNAL AI KNOWLEDGE (answered on a depersonalized version — no names or specific identifiers):
+EXTERNAL KNOWLEDGE (answered on an anonymized version of the question):
 {external_answer}
 
 INSTRUCTIONS:
-1. The external knowledge provides comprehensive, general analysis — use it as your evidence base.
-2. You have the full original context; apply the top guidance to THIS specific situation.
-3. Do NOT expose IDs, SSNs, account numbers, or contact details in your answer.
-4. Synthesize the strengths of both responses into a single, complete answer.
-5. Respond in the SAME LANGUAGE as the original question.
+1. Use the external knowledge as the evidence base; apply it to the specific situation in the original question.
+2. Do not repeat or surface identifiers (SSNs, account numbers, contact details) in the answer.
+3. Do not add privacy warnings, disclaimers, or alerts — the gateway already handles that.
+4. Respond in the SAME LANGUAGE as the original question.
 
 Write the final answer now:"""
 
@@ -41,6 +41,7 @@ Write the final answer now:"""
 class RelayOrchestrator:
     def __init__(self, config=None):
         self.config = config or get_settings()
+        self.safety = SafetyGuard()
         self.ollama = OllamaClient(
             model=self.config.local_model,
             host=self.config.local_host,
@@ -58,6 +59,7 @@ class RelayOrchestrator:
         user_query: str,
         api_key: str = None,
         session_id: str = None,
+        messages_history: list = None,
     ) -> Dict[str, Any]:
         trace_id = str(uuid.uuid4())
         start_time = time.time()
@@ -65,41 +67,57 @@ class RelayOrchestrator:
 
         # ── Load session state ────────────────────────────────────────────────
         # raw_history      : full PII-intact turns (local LLM only)
-        # sanitized_history: reformulated turns (safe to pass to external)
+        # sanitized_history: external-safe turns (safe to pass to external)
         if session_id:
             session = get_session(session_id)
             raw_history = session["raw_history"]
             sanitized_history = session["sanitized_history"]
+        elif messages_history:
+            # Client sent full messages array (standard OpenAI format)
+            raw_history = messages_history
+            sanitized_history = []
+            for m in messages_history:
+                if m.get("role") == "user":
+                    redacted, _, _, _ = self.safety.scan_and_redact(m["content"])
+                    sanitized_history.append({"role": "user", "content": redacted})
+                else:
+                    sanitized_history.append(m)
         else:
             raw_history = []
             sanitized_history = []
 
-        # ── Stage 1: Reformulate ──────────────────────────────────────────────
-        # Local LLM sees the sanitized_history (safe prior context) + current raw query.
-        # Returns {"route": "hybrid"|"local", "reformulated": str|None}
+        # ── Stage 1: Route planning ───────────────────────────────────────────
+        # Local planner sees the sanitized_history (safe prior context) + current raw query.
+        # Returns {"execution_path": "hybrid"|"local", "external_query": str|None}
         t0 = time.time()
-        reformat_result = await self.ollama.semantic_reformulate(
+        execution_plan = await self.ollama.plan_execution(
             text=user_query,
             sanitized_context=sanitized_history or None,
         )
-        route = reformat_result["route"]
-        reformulated = reformat_result.get("reformulated") or user_query
-        timings["reformulate_ms"] = (time.time() - t0) * 1000
-        log_event(trace_id, "reformulate", raw_input=user_query,
-                  raw_output={"route": route, "reformulated": reformulated},
-                  provider="local", latency_ms=timings["reformulate_ms"])
-        print(f"[Stage 1] Route={route} | Reformulated ({len(reformulated)} chars)")
+        execution_path = execution_plan["execution_path"]
+        external_query = execution_plan.get("external_query") or user_query
+        timings["planning_ms"] = (time.time() - t0) * 1000
+        log_event(trace_id, "planning", raw_input=user_query,
+                  raw_output={"execution_path": execution_path, "external_query": external_query},
+                  provider="local", latency_ms=timings["planning_ms"])
+        if execution_path == "local":
+            print("[Stage 1] Planner decided local-only | No external call")
+        else:
+            print(
+                f"[Stage 1] Planner decided hybrid | External query prepared "
+                f"({len(external_query)} chars)"
+            )
 
         # ── Build message arrays ──────────────────────────────────────────────
         # Local gets raw history + original query (full context, decision-maker).
-        # External gets sanitized history + reformulated query (no PII).
+        # External gets sanitized history + external-safe query (no PII).
         raw_messages = raw_history + [{"role": "user", "content": user_query}]
-        sanitized_messages = sanitized_history + [{"role": "user", "content": reformulated}]
+        sanitized_messages = sanitized_history + [{"role": "user", "content": external_query}]
 
         local_provider = LocalProvider(ollama_client=self.ollama)
 
         # ── Stage 2: Inference ────────────────────────────────────────────────
-        if route == "local":
+        if execution_path == "local":
             # Local-only: no external call.
             t0 = time.time()
             final_answer = await local_provider.generate_async_messages(raw_messages) or ""
@@ -111,7 +129,7 @@ class RelayOrchestrator:
             if session_id:
                 append_turn(session_id,
                             raw_user=user_query,
-                            sanitized_user=reformulated,
+                            sanitized_user=external_query,
                             assistant=final_answer)
 
             total_latency = (time.time() - start_time) * 1000
@@ -129,7 +147,7 @@ class RelayOrchestrator:
                 "trace_id": trace_id,
             }
 
-        # route == "hybrid": parallel local (raw) + external (sanitized)
+        # execution_path == "hybrid": parallel local (raw) + external (sanitized)
         async def _run_local() -> str:
             return await local_provider.generate_async_messages(raw_messages) or ""
 
@@ -138,9 +156,9 @@ class RelayOrchestrator:
                 if hasattr(self.external_provider, "generate_async_messages"):
                     ans = await self.external_provider.generate_async_messages(sanitized_messages) or ""
                 elif hasattr(self.external_provider, "generate_async"):
-                    ans = await self.external_provider.generate_async(reformulated) or ""
+                    ans = await self.external_provider.generate_async(external_query) or ""
                 else:
-                    ans = self.external_provider.generate(reformulated) or ""
+                    ans = self.external_provider.generate(external_query) or ""
                 return ans, False
             except Exception as e:
                 print(f"[External Error] {e}")
@@ -155,7 +173,7 @@ class RelayOrchestrator:
         timings["external_ms"] = parallel_ms
         log_event(trace_id, "local_direct", raw_input=user_query, raw_output=local_answer,
                   provider="local", latency_ms=parallel_ms)
-        log_event(trace_id, "external_knowledge", raw_input=reformulated, raw_output=external_answer,
+        log_event(trace_id, "external_knowledge", raw_input=external_query, raw_output=external_answer,
                   provider=self.config.external_provider, latency_ms=parallel_ms,
                   safety_flags={"blocked": blocked})
         print(
@@ -187,7 +205,7 @@ class RelayOrchestrator:
         if session_id:
             append_turn(session_id,
                         raw_user=user_query,
-                        sanitized_user=reformulated,
+                        sanitized_user=external_query,
                         assistant=final_answer)
 
         total_latency = (time.time() - start_time) * 1000
@@ -196,7 +214,7 @@ class RelayOrchestrator:
         return {
             "final_answer": final_answer,
             "steps": {
-                "reformulated_query": reformulated,
+                "reformulated_query": external_query,
                 "local_answer": local_answer,
                 "external_answer": external_answer,
             },
