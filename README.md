@@ -1,6 +1,6 @@
 # Zipsa
 
-**A local-first privacy gateway for OpenAI-compatible apps and OpenClaw workflows.**
+**Privacy gateway for LLM apps and OpenClaw.**
 
 ![Privacy First](https://img.shields.io/badge/privacy-local--first-1f6feb)
 ![OpenAI Compatible](https://img.shields.io/badge/api-openai--compatible-0a7f5a)
@@ -11,21 +11,25 @@
 > Zipsa is experimental software. Routing behavior, prompts, APIs, and configuration may change without notice as the privacy architecture is validated.
 > Use it for evaluation and iteration, not as a stable production release.
 
-Zipsa sits between your application and external LLMs. It decides when a request can stay fully local, when external knowledge is actually needed, and how to rewrite the request so private context does not leave your environment.
+Zipsa sits between your app and external LLMs. It keeps sensitive context local when possible, decides when outside knowledge is actually needed, and reformulates prompts before anything is sent to a cloud model.
 
-**Works especially well as a privacy front-door for OpenClaw** via Zipsa's OpenAI-compatible endpoint.
+**What it gives you**
 
-- New here? Start with [How It Works](#how-it-works)
-- Using OpenClaw? Jump to [OpenClaw Integration Guide](#openclaw-integration-guide)
-- Want to try it quickly? See [Getting Started](#-getting-started)
+- Keep identity-bound or simple requests fully local
+- Use cloud models only for depersonalized knowledge requests
+- Drop in behind OpenClaw or any OpenAI-compatible client
 
-Cloud AI models are powerful — but sending patient records, employee data, or business documents to an external API creates real privacy risks.
+**Best fit for teams that want a privacy boundary in front of OpenClaw or any OpenAI-compatible app.**
 
-Zipsa solves this with a local-first approach: a local LLM (Ollama) evaluates every request and decides whether external knowledge is even needed. Simple queries, personal questions, and anything identity-bound are answered **entirely locally** — nothing leaves your environment.
+**Quick links**
 
-When external knowledge would genuinely help, the local LLM **semantically reformulates** the query into a fully depersonalized version before anything is sent out. The cloud model answers only the sanitized version; the local model then applies that knowledge back to your actual context to produce the final answer.
+- [Getting Started](#-getting-started)
+- [How It Works](#how-it-works)
+- [OpenClaw Integration Guide](#openclaw-integration-guide)
 
-It also exposes an **OpenAI-compatible API (`/v1/chat/completions`)** so it works as a drop-in replacement in any tool that supports OpenAI (Chatbox, AnythingLLM, etc.).
+Cloud AI models are powerful, but sending patient records, employee data, or business documents directly to an external API creates real privacy risk. Zipsa acts as a local-first decision layer in front of cloud models.
+
+## How It Works
 
 ```mermaid
 flowchart LR
@@ -45,8 +49,6 @@ flowchart LR
     style X fill:#fff3e8,stroke:#b35c00,color:#1f2328
     style F fill:#e8f1ff,stroke:#1f6feb,color:#1f2328
 ```
-
-## How It Works
 
 ```text
 User query (original, with private context)
