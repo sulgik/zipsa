@@ -7,11 +7,15 @@
 ![Ollama](https://img.shields.io/badge/local%20llm-Ollama-222222)
 ![Hybrid Routing](https://img.shields.io/badge/routing-local%20%7C%20hybrid-b35c00)
 
+<p align="center">
+  <img src="zipsa.jpg" alt="Zipsa" width="180" />
+</p>
+
 > [!WARNING]
 > Zipsa is experimental software. Routing behavior, prompts, APIs, and configuration may change without notice as the privacy architecture is validated.
 > Use it for evaluation and iteration, not as a stable production release.
 
-Zipsa sits between your app and external LLMs. It keeps sensitive context local when possible, decides whether outside knowledge is actually needed, and reformulates prompts only when something is sent to a cloud model.
+Zipsa sits between your app and external LLMs. It keeps sensitive context local when possible, decides whether outside knowledge is actually needed, and reformulates prompts only when something is sent to a cloud model. The name comes from the Korean word for "butler."
 
 **What it gives you**
 
