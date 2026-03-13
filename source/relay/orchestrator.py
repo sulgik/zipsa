@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional
 from source.relay.ollama import OllamaClient
 from source.relay.logging import log_event
 from source.relay.config import get_settings
-from source.relay.session import get_session, append_turn
+from source.relay.session import get_session, append_main_turn, append_sub_turn
 from source.relay.safety import SafetyGuard
 from source.relay.providers.claude_provider import ClaudeProvider
 from source.relay.providers.gemini_provider import GeminiProvider
@@ -67,36 +67,39 @@ class RelayOrchestrator:
         timings = {}
 
         # ── Load session state ────────────────────────────────────────────────
-        # raw_history      : full PII-intact turns (local LLM only)
-        # sanitized_history: external-safe turns (safe to pass to external)
+        # main_thread: full PII-intact local conversation
+        # sub_thread : external-safe auxiliary conversation for hybrid turns only
         if session_id:
             session = get_session(session_id)
-            raw_history = session["raw_history"]
-            sanitized_history = session["sanitized_history"]
+            main_thread = session["main_thread"]
+            sub_thread = session["sub_thread"]
         elif messages_history:
             # Client sent full messages array (standard OpenAI format)
-            raw_history = messages_history
-            sanitized_history = []
+            main_thread = messages_history
+            sub_thread = []
             for m in messages_history:
                 if m.get("role") == "user":
                     redacted, _, _, _ = self.safety.scan_and_redact(m["content"])
-                    sanitized_history.append({"role": "user", "content": redacted})
+                    sub_thread.append({"role": "user", "content": redacted})
                 else:
-                    sanitized_history.append(m)
+                    sub_thread.append(m)
         else:
-            raw_history = []
-            sanitized_history = []
+            main_thread = []
+            sub_thread = []
 
         # ── Stage 1: Route planning ───────────────────────────────────────────
-        # Local planner sees the sanitized_history (safe prior context) + current raw query.
+        # Local planner sees the main thread plus the current raw query.
         # Returns {"execution_path": "hybrid"|"local", "external_query": str|None}
         t0 = time.time()
         execution_plan = await self.ollama.plan_execution(
             text=user_query,
-            sanitized_context=sanitized_history or None,
+            conversation_context=main_thread or None,
         )
         execution_path = execution_plan["execution_path"]
-        external_query = execution_plan.get("external_query") or user_query
+        external_query = execution_plan.get("external_query")
+        if execution_path == "hybrid" and not external_query:
+            print("[Stage 1] Planner returned hybrid without external query | Falling back to local-only")
+            execution_path = "local"
         timings["planning_ms"] = (time.time() - t0) * 1000
         log_event(trace_id, "planning", raw_input=user_query,
                   raw_output={"execution_path": execution_path, "external_query": external_query},
@@ -110,10 +113,12 @@ class RelayOrchestrator:
             )
 
         # ── Build message arrays ──────────────────────────────────────────────
-        # Local gets raw history + original query (full context, decision-maker).
-        # External gets sanitized history + external-safe query (no PII).
-        raw_messages = raw_history + [{"role": "user", "content": user_query}]
-        sanitized_messages = sanitized_history + [{"role": "user", "content": external_query}]
+        # Local gets the full main thread + current user query.
+        # External gets only the external-safe sub-thread + new external-safe query.
+        main_messages = main_thread + [{"role": "user", "content": user_query}]
+        sub_messages = sub_thread.copy()
+        if external_query:
+            sub_messages.append({"role": "user", "content": external_query})
 
         local_provider = LocalProvider(ollama_client=self.ollama)
 
@@ -121,17 +126,14 @@ class RelayOrchestrator:
         if execution_path == "local":
             # Local-only: no external call.
             t0 = time.time()
-            final_answer = await local_provider.generate_async_messages(raw_messages) or ""
+            final_answer = await local_provider.generate_async_messages(main_messages) or ""
             timings["local_ms"] = (time.time() - t0) * 1000
             log_event(trace_id, "local_only", raw_input=user_query, raw_output=final_answer,
                       provider="local", latency_ms=timings["local_ms"])
             print(f"[Stage 2] Local-only: {len(final_answer)} chars")
 
             if session_id:
-                append_turn(session_id,
-                            raw_user=user_query,
-                            sanitized_user=external_query,
-                            assistant=final_answer)
+                append_main_turn(session_id, user=user_query, assistant=final_answer)
 
             total_latency = (time.time() - start_time) * 1000
             log_event(trace_id, "complete", latency_ms=total_latency)
@@ -150,16 +152,16 @@ class RelayOrchestrator:
 
         # execution_path == "hybrid": parallel local (raw) + external (sanitized)
         async def _run_local() -> str:
-            return await local_provider.generate_async_messages(raw_messages) or ""
+            return await local_provider.generate_async_messages(main_messages) or ""
 
         async def _run_external() -> tuple:
             try:
                 if hasattr(self.external_provider, "generate_async_messages"):
-                    ans = await self.external_provider.generate_async_messages(sanitized_messages) or ""
+                    ans = await self.external_provider.generate_async_messages(sub_messages) or ""
                 elif hasattr(self.external_provider, "generate_async"):
-                    ans = await self.external_provider.generate_async(external_query) or ""
+                    ans = await self.external_provider.generate_async(external_query or "") or ""
                 else:
-                    ans = self.external_provider.generate(external_query) or ""
+                    ans = self.external_provider.generate(external_query or "") or ""
                 return ans, False
             except Exception as e:
                 print(f"[External Error] {e}")
@@ -204,10 +206,9 @@ class RelayOrchestrator:
         )
 
         if session_id:
-            append_turn(session_id,
-                        raw_user=user_query,
-                        sanitized_user=external_query,
-                        assistant=final_answer)
+            append_main_turn(session_id, user=user_query, assistant=final_answer)
+            if external_query:
+                append_sub_turn(session_id, user=external_query, assistant=external_answer)
 
         total_latency = (time.time() - start_time) * 1000
         log_event(trace_id, "complete", latency_ms=total_latency)

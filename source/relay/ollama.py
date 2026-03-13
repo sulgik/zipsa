@@ -105,7 +105,7 @@ Return ONLY the rewritten text.
         ]
         return await self.chat(messages, temperature=0.0)
 
-    async def plan_execution(self, text: str, sanitized_context: list = None) -> dict:
+    async def plan_execution(self, text: str, conversation_context: list = None) -> dict:
         """
         Decide the execution path and, when needed, prepare an external-safe query.
 
@@ -114,8 +114,9 @@ Return ONLY the rewritten text.
         execution_path="local"  → skip external call; local LLM handles the query entirely.
         execution_path="hybrid" → run local (original) + external (external_query) in parallel.
 
-        sanitized_context: prior turns already external-safe (safe to include as conversation
-        history so the reformulator understands ongoing context without re-exposing PII).
+        conversation_context: prior turns from the local main thread. This runs inside the
+        trusted zone, so the planner may use original conversation context to decide
+        whether an external-safe reformulation is possible and useful.
         Format: [{"role": "user"|"assistant", "content": str}, ...]
         """
         system_prompt = """You are a privacy-preserving query router and reformulator.
@@ -123,8 +124,9 @@ Return ONLY the rewritten text.
 Your job: Decide whether external AI knowledge would improve the answer, and if so,
 produce a depersonalized reformulation that reveals no identifying information.
 
-If conversation history is provided, use it to understand context — it is already
-depersonalized. Your reformulation of the new query must be consistent with that history.
+If conversation history is provided, use it to understand context inside the trusted
+local environment. That history may contain private details. Do not repeat those
+details in the reformulated external query unless they can be safely abstracted away.
 
 OUTPUT: A single JSON object — no markdown, no explanation:
 {"route": "hybrid", "reformulated": "<depersonalized knowledge request>"}
@@ -173,8 +175,8 @@ Now analyze this query:"""
         import re as _re
 
         messages = [{"role": "system", "content": system_prompt.strip()}]
-        if sanitized_context:
-            messages.extend(sanitized_context)
+        if conversation_context:
+            messages.extend(conversation_context)
         messages.append({"role": "user", "content": text})
         raw = await self.chat(messages, temperature=0.1)
 

@@ -58,13 +58,13 @@ flowchart LR
 User query (original, with private context)
   │
   ├─ Stage 1: Local planning
-  │     Decides whether the request should stay local
-  │     or use hybrid execution with an external query
-  │     Output: route="hybrid" or route="local"
+  │     Main thread + current user query stay local
+  │     The planner decides: local-only or hybrid
+  │     If hybrid, it also prepares a reformulated external query
   │
   ├─ Stage 2: Parallel inference  [hybrid only]
-  │     Local LLM  ← raw_history + original query   (full context, decision-maker)
-  │     External LLM ← sanitized_history + reformulated query  (no PII, ever)
+  │     Local LLM    ← main_thread + original query   (full context, decision-maker)
+  │     External LLM ← sub_thread + reformulated query  (external-safe only)
   │
   └─ Stage 3: Local LLM synthesizes  [hybrid only]
         Original context + external knowledge → final personalized answer
@@ -80,29 +80,29 @@ User query (original, with private context)
 
 ## Multi-Turn Privacy
 
-For multi-turn conversations, Zipsa maintains **two parallel histories per session**:
+For multi-turn conversations, Zipsa maintains **two linked threads per session**:
 
 ```text
 Session state
-├── raw_history        (local LLM only — never sent externally)
+├── main_thread   (local-only, full conversation)
 │   ├── Turn 1 user:  "Jane Smith (SSN 123-45-6789), HbA1c 8.4%..."
 │   ├── Turn 1 asst:  "Consider GLP-1 agonist..."
 │   └── Turn 2 user:  "Her eGFR dropped to 45, what now?"
 │
-└── sanitized_history  (sent to external provider)
+└── sub_thread    (external-safe, hybrid turns only)
     ├── Turn 1 user:  "T2DM patient, late 50s. HbA1c 8.4%..."
-    ├── Turn 1 asst:  "Consider GLP-1 agonist..."
-    └── Turn 2 user:  (← reformulated from current raw turn)
+    ├── Turn 1 asst:  "...external knowledge response..."
+    └── Turn 2 user:  (only added if this turn is hybrid)
 ```
 
-On each new turn, the local planning step receives the **sanitized history as context** (so it understands the ongoing conversation without re-exposing prior PII). When it selects hybrid execution, it reformulates the **current raw message** into a depersonalized version. The external provider receives a proper messages array — sanitized history plus the new reformulated turn — never the raw originals.
+On each new turn, the local planning step can see the **main thread** inside the trusted zone. If it selects hybrid execution, it reformulates the current raw message into an external-safe query and appends that turn to the **sub-thread**. Local-only turns stay in the main thread only; they are not mirrored into the external thread.
 
 ## ✨ Key Features
 
 - **Local LLM as privacy shield**: a local model always intermediates between your data and any external provider — raw queries never leave your environment.
 - **Semantic reformulation**: full sentence rewriting that abstracts context (occupation → category, institution → type, event → description), not just PII token replacement.
 - **Autonomous routing**: the local LLM decides per-turn whether external knowledge is needed, so simple or identity-bound queries stay entirely local.
-- **Dual-history sessions**: raw history stays local; only the sanitized history is passed to the external provider as a proper multi-turn messages array.
+- **Dual-thread sessions**: the main thread stays local; the sub-thread contains only external-safe hybrid turns for the cloud provider.
 - **Local is the decision-maker**: the external model is a knowledge provider only — the local model synthesizes the final answer with full original context.
 - **OpenAI-compatible API**: drop-in replacement endpoint.
 - **Multi-provider support**: Claude, Gemini, or OpenAI as the external model.

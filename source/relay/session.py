@@ -1,37 +1,44 @@
 """
-In-memory session store for dual-history multi-turn conversations.
+In-memory session store for dual-thread multi-turn conversations.
 
-Each session maintains two parallel histories:
-  raw_history       — original messages with PII (local LLM only, never sent externally)
-  sanitized_history — reformulated/depersonalized messages (sent to external provider)
+Each session maintains two linked conversation threads:
+  main_thread — the full local conversation with original user turns and final answers
+  sub_thread  — the external-safe conversation used only for hybrid knowledge access
 
-Assistant responses are identical in both histories since the local LLM
-generates them and they contain no raw PII.
+The sub-thread is intentionally sparse: local-only turns do not have to appear there.
 """
-from typing import Dict, List
+from typing import Dict
 
-# session_id -> {"raw_history": [...], "sanitized_history": [...]}
+# session_id -> {"main_thread": [...], "sub_thread": [...]}
 _store: Dict[str, dict] = {}
 
 
 def get_session(session_id: str) -> dict:
     if session_id not in _store:
-        _store[session_id] = {"raw_history": [], "sanitized_history": []}
+        _store[session_id] = {"main_thread": [], "sub_thread": []}
     return _store[session_id]
 
 
-def append_turn(
+def append_main_turn(
     session_id: str,
-    raw_user: str,
-    sanitized_user: str,
+    user: str,
     assistant: str,
 ) -> None:
-    """Append one completed turn to both histories."""
+    """Append one completed turn to the local main thread only."""
     s = get_session(session_id)
-    s["raw_history"].append({"role": "user",      "content": raw_user})
-    s["raw_history"].append({"role": "assistant",  "content": assistant})
-    s["sanitized_history"].append({"role": "user",      "content": sanitized_user})
-    s["sanitized_history"].append({"role": "assistant",  "content": assistant})
+    s["main_thread"].append({"role": "user", "content": user})
+    s["main_thread"].append({"role": "assistant", "content": assistant})
+
+
+def append_sub_turn(
+    session_id: str,
+    user: str,
+    assistant: str,
+) -> None:
+    """Append one completed turn to the external-safe sub-thread only."""
+    s = get_session(session_id)
+    s["sub_thread"].append({"role": "user", "content": user})
+    s["sub_thread"].append({"role": "assistant", "content": assistant})
 
 
 def clear_session(session_id: str) -> None:
