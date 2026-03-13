@@ -37,7 +37,7 @@ Cloud AI models are powerful, but sending patient records, employee data, or bus
 
 ```mermaid
 flowchart LR
-    U[User Query<br/>Private Context] --> L[Local LLM via Ollama<br/>Plan Route]
+    U[User Query<br/>Private Context] --> L[Local LLM via Ollama<br/>Plan Execution]
     L -->|local-only| A[Final Answer<br/>Stays Local]
     L -->|hybrid| S[Reformulated Query]
     S --> E[External Model<br/>Claude / Gemini / OpenAI]
@@ -78,9 +78,16 @@ User query (original, with private context)
 | External sees | *"A healthcare professional (physician) in their late 30s with T2DM. HbA1c worsening 7.8→8.4% over 6 months. Current regimen: metformin 2000mg + DPP-4i (sitagliptin 100mg), eGFR 62. Rank the top escalation strategies with expected HbA1c reduction, renal dosing requirements, and monitoring needs."* |
 | Local decides | Applies the ranked clinical analysis to Jane's actual profile → final answer |
 
-## Multi-Turn Privacy
+## Dual-Context Conversation Model
 
-For multi-turn conversations, Zipsa maintains **two linked threads per session**:
+In Zipsa, a single conversation can carry two different kinds of context at the same time:
+
+- the **main conversation**, which may contain identity-bound or sensitive details and must stay local
+- the **external-safe conversation**, which should contain only the information that can safely leave the trusted zone
+
+The challenge is that these two context lanes do not evolve in lockstep. A local-only turn may be important for the real conversation, but it may have no safe external representation at all. If you try to mirror every turn into a single "sanitized history," you risk either leaking raw context or forcing unnatural summaries.
+
+With a stable `session_id`, Zipsa solves this by maintaining **two linked threads per session**:
 
 ```text
 Session state
@@ -95,7 +102,7 @@ Session state
     └── Turn 2 user:  (only added if this turn is hybrid)
 ```
 
-On each new turn, the local planning step can see the **main thread** inside the trusted zone. If it selects hybrid execution, it reformulates the current raw message into an external-safe query and appends that turn to the **sub-thread**. Local-only turns stay in the main thread only; they are not mirrored into the external thread.
+On each new turn, the local planning step can see the **main thread** inside the trusted zone. If it selects hybrid execution, it reformulates the current raw message into an external-safe query and appends that turn to the **sub-thread**. Local-only turns stay in the main thread only; they are not mirrored into the external thread. When a client sends a plain OpenAI-style `messages` array without `session_id`, Zipsa falls back to reconstructing a temporary external-safe context instead of using this persisted two-thread session model.
 
 ## ✨ Key Features
 
