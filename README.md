@@ -36,47 +36,105 @@ Cloud AI models are powerful, but sending patient records, employee data, or bus
 ## How It Works
 
 ```mermaid
-flowchart LR
-    U[User Query<br/>Private Context] --> L[Local LLM via Ollama<br/>Plan Execution]
-    L -->|local-only| A[Final Answer<br/>Stays Local]
-    L -->|hybrid| S[Reformulated Query]
-    S --> E[External Model<br/>Claude / Gemini / OpenAI]
-    E --> X[Knowledge Only]
-    X --> L
-    L --> F[Final Personalized Answer]
+graph LR
+    subgraph TZ["🔒 Trusted Zone  (local machine)"]
+        U([User Query]) --> FP[Formal Planner<br/>Classify · Propose · Validate]
+        FP -->|local_only| L1[Local LLM<br/>answer]
+        FP -->|"hybrid:<br/>reformulate"| PV[PII Scan<br/>verify output]
+        PV -->|"leaked → fallback"| L1
+        FP -->|"synthesis mode<br/>concurrent"| L2[Local LLM<br/>direct answer]
+        L2 --> Synth[Local LLM<br/>synthesize]
+        EK[External<br/>Knowledge] --> Synth
+        Synth --> FA([Final Answer])
+        L1 --> FA
+    end
 
+    subgraph Cloud["☁️ External  (untrusted)"]
+        EXT[External LLM<br/>Claude / Gemini / OpenAI]
+    end
+
+    PV -->|"clean · depersonalized only"| EXT
+    EXT -->|"selective mode"| FA
+    EXT --> EK
+
+    style TZ fill:#f0f6ff,stroke:#1f6feb,color:#1f2328
+    style Cloud fill:#fff8f0,stroke:#b35c00,color:#1f2328
     style U fill:#f7f1e8,stroke:#8a5a00,color:#1f2328
-    style L fill:#e8f1ff,stroke:#1f6feb,color:#1f2328
-    style S fill:#eef9f1,stroke:#0a7f5a,color:#1f2328
-    style E fill:#fff3e8,stroke:#b35c00,color:#1f2328
-    style A fill:#eef9f1,stroke:#0a7f5a,color:#1f2328
-    style X fill:#fff3e8,stroke:#b35c00,color:#1f2328
-    style F fill:#e8f1ff,stroke:#1f6feb,color:#1f2328
+    style FA fill:#eef9f1,stroke:#0a7f5a,color:#1f2328
+    style FP fill:#f0e8ff,stroke:#6f42c1,color:#1f2328
+    style PV fill:#fff3cd,stroke:#856404,color:#1f2328
+    style EXT fill:#fff8f0,stroke:#b35c00,color:#1f2328
 ```
 
 ```text
 User query (original, with private context)
   │
-  ├─ Stage 1: Local planning
-  │     Main thread + current user query stay local
-  │     The planner decides: local-only or hybrid
-  │     If hybrid, it also prepares a reformulated external query
+  ├─ Stage 1: Formal planning  (3-layer pipeline, no LLM for routing)
+  │     1a. PII scan    — deterministic regex → pii_types, pii_detected
+  │     1b. Classifier  — tag extraction: task_type, injection_risk, exfiltration_risk,
+  │                        nl_pii_detected (sentence-level PII signals, English + Korean)
+  │     1c. Planner     — propose decision: local_only | hybrid
+  │                        priority order: security → task type
+  │     1d. Validator   — enforce policy invariants (monotonic downgrade only)
+  │         INV-2: injection_risk=high        → force local_only
+  │         INV-3: exfiltration_risk          → force local_only
+  │         INV-4: crisis content             → force local_only
+  │         INV-6: medium injection + PII     → force local_only (exfiltration assist)
+  │     1e. If hybrid: Local LLM reformulates query → PII scan on output → send or fall back
   │
-  ├─ Stage 2: Parallel inference  [hybrid only]
-  │     Local LLM    ← main_thread + original query   (full context, decision-maker)
-  │     External LLM ← sub_thread + reformulated query  (external-safe only)
+  ├─ Stage 2: Inference  [hybrid only — two modes]
+  │     selective  (code, text rewrite, structured generation, …)
+  │       External LLM ← reformulated query  →  answer returned directly
+  │       ~1 LLM call saved vs synthesis; external answer is self-contained
+  │     synthesis  (domain knowledge, analysis)
+  │       Local LLM    ← original query  (concurrent)
+  │       External LLM ← reformulated query  (concurrent)
   │
-  └─ Stage 3: Local LLM synthesizes  [hybrid only]
-        Original context + external knowledge → final personalized answer
+  └─ Stage 3: Local synthesis  [synthesis mode only]
+        Local answer + external knowledge → personalized final answer
 ```
 
-**Reformulation example:**
+### Routing Logic
+
+The formal planner routes each query to one of two paths, then enforces privacy at the reformulation output rather than upfront:
+
+```text
+Classify → Propose → Validate → [if hybrid] Reformulate → PII scan output → [clean] send | [leaked] fall back to local
+```
+
+Hybrid is proposed when:
+
+- Task type is `domain_knowledge`, `code_technical`, `text_rewrite`, or similar external-preferred types
+- No injection or exfiltration pattern detected
+- Query is not identity-bound (`pii_dependent`, `crisis_sensitive`, `roleplay_persona` always stay local)
+
+The reformulated query is then scanned for PII before it leaves the local environment. If any PII is detected in the output, the turn falls back to local automatically — no partial or ambiguous sends.
+
+#### Example: domain knowledge with incidental PII → hybrid (SSN stripped by reformulator)
 
 | | Query |
 | --- | --- |
-| User sends | *"Jane Smith (DOB 1985-04-12, SSN 123-45-6789) is a senior ER physician at City General. Her HbA1c has worsened 7.8→8.4% over 6 months on metformin 2000mg + sitagliptin 100mg (eGFR 62). What are the treatment escalation options?"* |
-| External sees | *"A healthcare professional (physician) in their late 30s with T2DM. HbA1c worsening 7.8→8.4% over 6 months. Current regimen: metformin 2000mg + DPP-4i (sitagliptin 100mg), eGFR 62. Rank the top escalation strategies with expected HbA1c reduction, renal dosing requirements, and monitoring needs."* |
+| User sends | *"Jane Smith (DOB 1985-04-12, SSN 123-45-6789) is a senior ER physician. Her HbA1c has worsened 7.8→8.4% over 6 months on metformin 2000mg + sitagliptin 100mg (eGFR 62). What are the treatment escalation options?"* |
+| Planner sees | NAME + ID detected, task = domain_knowledge → propose hybrid |
+| Reformulator outputs | *"A healthcare professional (physician) in their late 30s with T2DM. HbA1c worsening 7.8→8.4% over 6 months. Current regimen: metformin 2000mg + DPP-4i (sitagliptin 100mg), eGFR 62. Rank the top escalation strategies with expected HbA1c reduction, renal dosing requirements, and monitoring needs."* |
+| Output PII scan | No PII detected → send to external |
 | Local decides | Applies the ranked clinical analysis to Jane's actual profile → final answer |
+
+#### Example: identity-bound query → local only (classifier decision)
+
+| | Query |
+| --- | --- |
+| User sends | *"Look up John's SSN 123-45-6789 and get his insurance status."* |
+| Planner sees | ID detected, task = pii_dependent (the SSN IS the answer) → local_only |
+| External sees | Nothing — query never leaves the local environment |
+
+#### Example: sentence-level personal context, no external knowledge needed → local only
+
+| | Query |
+| --- | --- |
+| User sends | *"My salary is $120k annually — is that a fair rate for a senior engineer in NYC?"* |
+| Planner sees | nl_pii_detected (salary + amount), no domain knowledge signal → pii_dependent → local_only |
+| External sees | Nothing |
 
 ## Dual-Context Conversation Model
 
@@ -108,7 +166,7 @@ On each new turn, the local planning step can see the **main thread** inside the
 
 - **Local LLM as privacy shield**: a local model always intermediates between your data and any external provider — raw queries never leave your environment.
 - **Semantic reformulation**: full sentence rewriting that abstracts context (occupation → category, institution → type, event → description), not just PII token replacement.
-- **Autonomous routing**: the local LLM decides per-turn whether external knowledge is needed, so simple or identity-bound queries stay entirely local.
+- **Formal routing**: a deterministic 3-layer planner (Classifier → Planner → Validator) decides per-turn whether external knowledge is needed — no LLM call for routing, immune to prompt injection.
 - **Dual-thread sessions**: the main thread stays local; the sub-thread contains only external-safe hybrid turns for the cloud provider.
 - **Local is the decision-maker**: the external model is a knowledge provider only — the local model synthesizes the final answer with full original context.
 - **OpenAI-compatible API**: drop-in replacement endpoint.

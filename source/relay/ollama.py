@@ -105,6 +105,67 @@ Return ONLY the rewritten text.
         ]
         return await self.chat(messages, temperature=0.0)
 
+    async def reformulate(self, text: str, conversation_context: list = None) -> str | None:
+        """
+        Generate an external-safe, depersonalized reformulation of the query.
+
+        Called only when the formal planner has already decided hybrid routing.
+        The conversation_context should be the external-safe sub_thread (not the
+        PII-intact main_thread) so the reformulation builds on sanitized history.
+
+        Returns the reformulated string, or None on failure (caller falls back to local).
+        """
+        system_prompt = """You are a privacy-preserving query reformulator.
+
+Your job: produce a depersonalized version of the user's query that reveals no identifying
+information, so it can be safely sent to an external AI service for knowledge assistance.
+
+If conversation history is provided, it represents the prior external-safe turns.
+Use it to understand context, but do not introduce any identifying details into the output.
+
+OUTPUT: A single JSON object — no markdown, no explanation:
+{"reformulated": "<depersonalized knowledge request>"}
+
+Reformulation rules:
+1. Remove ALL identifiers: names, DOB (use age range: "late 50s"), IDs, contact info, specific dates
+2. Replace semantic identifiers with generic categories:
+   - "senior ER physician at City General" → "healthcare professional (physician)"
+   - "principal cellist at a symphony" → "professional musician (string instrument)"
+   - "software engineer at Google" → "technology professional (software engineer)"
+   - "Samsung Seoul Hospital" → "a major hospital"
+3. Keep ALL task-relevant parameters precisely: lab values, measurements, code, error messages, constraints
+4. Reformulate as a follow-up to the sanitized conversation history (if any).
+
+EXAMPLES:
+Input:  "Jane Smith (SSN 123-45-6789) is a senior ER physician. Her patient's HbA1c worsened 7.8→8.4% over 6 months on metformin 2000mg + sitagliptin 100mg (eGFR 62). Next treatment options?"
+Output: {"reformulated": "A patient in their late 50s with T2DM. HbA1c worsening 7.8→8.4% over 6 months. Current regimen: metformin 2000mg + DPP-4i (sitagliptin 100mg), eGFR 62. Rank the top escalation strategies with expected HbA1c reduction, renal dosing requirements, and monitoring needs."}
+
+Input:  "John Smith (john@acme.com) is our CTO. Why are our AWS Lambda cold starts over 3s with a 512MB Node.js function?"
+Output: {"reformulated": "AWS Lambda cold starts exceeding 3 seconds with a 512MB Node.js function. What are the top causes and ranked mitigation strategies?"}
+
+Now reformulate this query:"""
+
+        import json as _json
+        import re as _re
+
+        messages = [{"role": "system", "content": system_prompt.strip()}]
+        if conversation_context:
+            messages.extend(conversation_context)
+        messages.append({"role": "user", "content": text})
+        raw = await self.chat(messages, temperature=0.1)
+
+        try:
+            clean = _re.sub(r"```(?:json)?", "", raw).strip().strip("`").strip()
+            start = clean.find("{")
+            end = clean.rfind("}") + 1
+            if start == -1 or end == 0:
+                raise ValueError("no JSON object found")
+            result = _json.loads(clean[start:end])
+            return result.get("reformulated") or None
+        except Exception as e:
+            print(f"[Reformulate Parse Error] {e} | raw={raw[:200]}")
+            return None
+
     async def plan_execution(self, text: str, conversation_context: list = None) -> dict:
         """
         Decide the execution path and, when needed, prepare an external-safe query.

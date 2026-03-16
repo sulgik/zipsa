@@ -87,34 +87,69 @@ class RelayOrchestrator:
             main_thread = []
             sub_thread = []
 
-        # ── Stage 1: Route planning ───────────────────────────────────────────
-        # Local planner sees the main thread plus the current raw query.
-        # Returns {"execution_path": "hybrid"|"local", "external_query": str|None}
+        # ── Stage 1: Formal route planning ───────────────────────────────────
+        # 1a. PII scan (deterministic regex — no LLM)
+        # 1b. Formal planner: Classify → Propose → Validate (no LLM, always conclusive)
+        # 1c. If hybrid, reformulate query for external use (single LLM call)
         t0 = time.time()
-        execution_plan = await self.ollama.plan_execution(
-            text=user_query,
-            conversation_context=main_thread or None,
+
+        # 1a. PII scan
+        _, pii_found, _, binding_map = self.safety.scan_and_redact(user_query)
+        pii_types = list({k.strip("[]").split("_")[0] for k in binding_map.keys()})
+
+        # 1b. Formal planner (deterministic, no LLM)
+        from source.relay.planner import plan as formal_plan
+        formal_decision = formal_plan(
+            query=user_query,
+            pii_types=pii_types,
+            pii_detected=pii_found,
         )
-        execution_path = execution_plan["execution_path"]
-        external_query = execution_plan.get("external_query")
-        if execution_path == "hybrid" and not external_query:
-            print("[Stage 1] Planner returned hybrid without external query | Falling back to local-only")
-            execution_path = "local"
-        timings["planning_ms"] = (time.time() - t0) * 1000
-        log_event(trace_id, "planning", raw_input=user_query,
-                  raw_output={"execution_path": execution_path, "external_query": external_query},
-                  provider="local", latency_ms=timings["planning_ms"])
-        if execution_path == "local":
-            print("[Stage 1] Planner decided local-only | No external call")
-        else:
-            print(
-                f"[Stage 1] Planner decided hybrid | External query prepared "
-                f"({len(external_query)} chars)"
+        execution_path = "hybrid" if formal_decision.decision == "hybrid" else "local"
+        hybrid_mode = formal_decision.hybrid_mode  # "synthesis" | "selective"
+        print(
+            f"[Stage 1] Formal planner → {formal_decision.decision} "
+            f"(reason={formal_decision.reason_code}, "
+            f"mode={hybrid_mode if execution_path == 'hybrid' else 'n/a'}, "
+            f"pii={pii_types or 'none'}, "
+            f"inj={formal_decision.classifier_tags.injection_risk})"
+        )
+
+        # 1c. If hybrid, reformulate for external use (LLM call, sub_thread = external-safe context)
+        #     Then verify the reformulation: scan for any PII that leaked through.
+        #     If PII is detected in the reformulated query, fall back to local automatically.
+        external_query = None
+        if execution_path == "hybrid":
+            external_query = await self.ollama.reformulate(
+                text=user_query,
+                conversation_context=sub_thread or None,
             )
+            if not external_query:
+                execution_path = "local"
+                print("[Stage 1] Reformulation failed | Falling back to local-only")
+            else:
+                _, reformulated_pii_found, _, reformulated_binding = self.safety.scan_and_redact(external_query)
+                if reformulated_pii_found:
+                    execution_path = "local"
+                    leaked = list(reformulated_binding.keys())[:3]
+                    print(f"[Stage 1] Reformulation leaked PII {leaked} | Falling back to local-only")
+                    external_query = None
+                else:
+                    print(f"[Stage 1] External query verified clean ({len(external_query)} chars)")
+
+        timings["planning_ms"] = (time.time() - t0) * 1000
+        log_event(
+            trace_id, "planning", raw_input=user_query,
+            raw_output={
+                "execution_path": execution_path,
+                "external_query": external_query,
+                "formal_reason": formal_decision.reason_code,
+                "pii_types": pii_types,
+                "injection_risk": formal_decision.classifier_tags.injection_risk,
+            },
+            provider="formal_planner", latency_ms=timings["planning_ms"],
+        )
 
         # ── Build message arrays ──────────────────────────────────────────────
-        # Local gets the full main thread + current user query.
-        # External gets only the external-safe sub-thread + new external-safe query.
         main_messages = main_thread + [{"role": "user", "content": user_query}]
         sub_messages = sub_thread.copy()
         if external_query:
@@ -123,6 +158,20 @@ class RelayOrchestrator:
         local_provider = LocalProvider(ollama_client=self.ollama)
 
         # ── Stage 2: Inference ────────────────────────────────────────────────
+
+        async def _run_external() -> tuple[str, bool]:
+            try:
+                if hasattr(self.external_provider, "generate_async_messages"):
+                    ans = await self.external_provider.generate_async_messages(sub_messages) or ""
+                elif hasattr(self.external_provider, "generate_async"):
+                    ans = await self.external_provider.generate_async(external_query or "") or ""
+                else:
+                    ans = self.external_provider.generate(external_query or "") or ""
+                return ans, False
+            except Exception as e:
+                print(f"[External Error] {e}")
+                return f"(External provider failed: {e})", True
+
         if execution_path == "local":
             # Local-only: no external call.
             t0 = time.time()
@@ -139,33 +188,55 @@ class RelayOrchestrator:
             log_event(trace_id, "complete", latency_ms=total_latency)
             return {
                 "final_answer": final_answer,
-                "steps": {
-                    "reformulated_query": None,
-                    "local_answer": final_answer,
-                    "external_answer": None,
-                },
+                "steps": {"reformulated_query": None, "local_answer": final_answer, "external_answer": None},
                 "provider": "local",
                 "timings": timings,
                 "latency_ms": total_latency,
                 "trace_id": trace_id,
             }
 
-        # execution_path == "hybrid": parallel local (raw) + external (sanitized)
+        if hybrid_mode == "selective":
+            # ── Selective hybrid: reformulate → external only, no synthesis ───
+            # Best for code, text rewrite, structured generation — external answer
+            # is self-contained; personalization via synthesis adds no value.
+            t0 = time.time()
+            external_answer, blocked = await _run_external()
+            timings["external_ms"] = (time.time() - t0) * 1000
+            log_event(trace_id, "external_selective", raw_input=external_query,
+                      raw_output=external_answer, provider=self.config.external_provider,
+                      latency_ms=timings["external_ms"], safety_flags={"blocked": blocked})
+
+            if blocked or not external_answer:
+                # External failed — fall back to local
+                t0 = time.time()
+                final_answer = await local_provider.generate_async_messages(main_messages) or ""
+                timings["local_ms"] = (time.time() - t0) * 1000
+                print(f"[Stage 2] Selective fallback to local: {len(final_answer)} chars")
+            else:
+                final_answer = external_answer
+                print(f"[Stage 2] Selective external: {len(external_answer)} chars ({timings['external_ms']:.0f}ms)")
+
+            if session_id:
+                append_main_turn(session_id, user=user_query, assistant=final_answer)
+                if external_query and not blocked:
+                    append_sub_turn(session_id, user=external_query, assistant=external_answer)
+
+            total_latency = (time.time() - start_time) * 1000
+            log_event(trace_id, "complete", latency_ms=total_latency)
+            return {
+                "final_answer": final_answer,
+                "steps": {"reformulated_query": external_query, "local_answer": None, "external_answer": external_answer},
+                "provider": self.config.external_provider,
+                "timings": timings,
+                "latency_ms": total_latency,
+                "trace_id": trace_id,
+            }
+
+        # ── Synthesis hybrid: concurrent local + external → local synthesizes ─
+        # Best for domain knowledge, analysis — external provides expert knowledge,
+        # local applies it to the user's specific personal context.
         async def _run_local() -> str:
             return await local_provider.generate_async_messages(main_messages) or ""
-
-        async def _run_external() -> tuple:
-            try:
-                if hasattr(self.external_provider, "generate_async_messages"):
-                    ans = await self.external_provider.generate_async_messages(sub_messages) or ""
-                elif hasattr(self.external_provider, "generate_async"):
-                    ans = await self.external_provider.generate_async(external_query or "") or ""
-                else:
-                    ans = self.external_provider.generate(external_query or "") or ""
-                return ans, False
-            except Exception as e:
-                print(f"[External Error] {e}")
-                return f"(External provider failed: {e})", True
 
         t0 = time.time()
         local_answer, (external_answer, blocked) = await asyncio.gather(
@@ -180,12 +251,11 @@ class RelayOrchestrator:
                   provider=self.config.external_provider, latency_ms=parallel_ms,
                   safety_flags={"blocked": blocked})
         print(
-            f"[Stage 2] Local: {len(local_answer)} chars | "
-            f"External: {len(external_answer)} chars ({parallel_ms:.0f}ms)"
+            f"[Stage 2] Synthesis — local: {len(local_answer)} chars | "
+            f"external: {len(external_answer)} chars ({parallel_ms:.0f}ms)"
         )
 
         # ── Stage 3: Local synthesis ──────────────────────────────────────────
-        # Local LLM combines both answers; external knowledge is evidence only.
         t0 = time.time()
         synthesis_text = SYNTHESIS_PROMPT.format(
             original_query=user_query,
