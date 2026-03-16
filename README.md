@@ -70,7 +70,7 @@ User query (original, with private context)
   │     1a. PII scan    — deterministic regex → pii_types, pii_detected
   │     1b. Classifier  — tag extraction: task_type, injection_risk, exfiltration_risk,
   │                        nl_pii_detected (sentence-level PII signals, English + Korean)
-  │     1c. Planner     — propose decision: local_only | hybrid (selective | synthesis)
+  │     1c. Planner     — propose decision: local_only | hybrid
   │                        priority order: security → task type
   │     1d. Validator   — enforce policy invariants (monotonic downgrade only)
   │         INV-2: injection_risk=high        → force local_only
@@ -82,11 +82,8 @@ User query (original, with private context)
   ├─ Stage 2: External inference  [hybrid only]
   │     External LLM answers the reformulated (depersonalized) query
   │
-  └─ Stage 3: Local binding / synthesis  [hybrid only]
-        selective  (code, text rewrite, structured generation)
-          Local LLM re-applies original personal context to the external answer
-        synthesis  (domain knowledge, analysis)
-          Local LLM applies external knowledge to the original personal situation
+  └─ Stage 3: Local synthesis  [hybrid only]
+        Local LLM applies the external answer back to the original personal context
 ```
 
 ### Routing Logic
@@ -102,11 +99,6 @@ Hybrid is proposed when:
 - Task type is `domain_knowledge`, `code_technical`, `text_rewrite`, or similar external-preferred types
 - No injection or exfiltration pattern detected
 - Query is not identity-bound (`pii_dependent`, `crisis_sensitive`, `roleplay_persona` always stay local)
-
-Within hybrid, the mode is determined by task type:
-
-- **synthesis** — `domain_knowledge`, `analysis_evaluation`: external knowledge + original personal context → deep personalized answer
-- **selective** — `code_technical`, `text_rewrite`, `structured_generation`, etc.: external answer + original context → lightly adapted answer
 
 The reformulated query is then scanned for PII before it leaves the local environment. If any PII is detected in the output, the turn falls back to local automatically — no partial or ambiguous sends.
 

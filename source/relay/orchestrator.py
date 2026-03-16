@@ -18,28 +18,10 @@ PROVIDERS = {
     "openai": OpenAIProvider,
 }
 
-# Used for synthesis mode (domain knowledge, analysis):
-# external knowledge + original personal context → thorough personalized answer
-SYNTHESIS_PROMPT = """You are the final synthesis step of a local privacy gateway running entirely on the user's machine. Personal details in the original question are kept here locally and were never sent externally — you do not need to warn about them. Your only job is to produce a helpful answer.
-
-ORIGINAL QUESTION:
-{original_query}
-
-EXTERNAL KNOWLEDGE (answered on an anonymized version of the question):
-{external_answer}
-
-INSTRUCTIONS:
-1. Use the external knowledge as the evidence base; apply it to the specific personal situation described in the original question.
-2. Provide a thorough, personalized answer that directly addresses the user's specific context and needs.
-3. Do not repeat or surface identifiers (SSNs, account numbers, contact details) in the answer.
-4. Do not add privacy warnings, disclaimers, or alerts — the gateway already handles that.
-5. Respond in the SAME LANGUAGE as the original question.
-
-Write the final answer now:"""
-
-# Used for selective mode (code, text rewrite, structured generation):
-# external answer + original context → lightly adapted answer
-BINDING_PROMPT = """You are the final binding step of a local privacy gateway. The original question may contain personal context that was stripped before the external model answered. Your job is to take the external answer and apply it back to the original question — filling in any personal specifics, adjusting references, and ensuring the answer directly addresses what the user actually asked.
+# Stage 3: local LLM applies the external answer back to the original personal context.
+# The external model answered an anonymized version of the query; this step re-introduces
+# the user's specific situation and delivers the final personalized response.
+LOCAL_PROMPT = """You are the final step of a local privacy gateway. The original question may contain personal context that was stripped before the external model answered. Your job is to deliver a final response that directly addresses the original question.
 
 ORIGINAL QUESTION:
 {original_query}
@@ -48,11 +30,12 @@ EXTERNAL ANSWER (produced from an anonymized version of the question):
 {external_answer}
 
 INSTRUCTIONS:
-1. Return the external answer adapted to the original question. Adjust any generic references to match the user's actual context where relevant.
-2. Do not repeat or surface identifiers (SSNs, account numbers, contact details) in the answer.
-3. Do not add privacy warnings, disclaimers, or alerts.
-4. If the external answer already fully addresses the original question without adaptation, return it as-is.
-5. Respond in the SAME LANGUAGE as the original question.
+1. Use the external answer as your primary source. Apply it to the specific context of the original question.
+2. Adjust any generic references to match the user's actual situation where relevant.
+3. If the external answer already fully addresses the original question, return it with minimal changes.
+4. Do not repeat or surface identifiers (SSNs, account numbers, contact details) in the answer.
+5. Do not add privacy warnings, disclaimers, or alerts — the gateway already handles that.
+6. Respond in the SAME LANGUAGE as the original question.
 
 Write the final answer now:"""
 
@@ -120,11 +103,9 @@ class RelayOrchestrator:
             pii_detected=pii_found,
         )
         execution_path = "hybrid" if formal_decision.decision == "hybrid" else "local"
-        hybrid_mode = formal_decision.hybrid_mode  # "synthesis" | "selective"
         print(
             f"[Stage 1] Formal planner → {formal_decision.decision} "
             f"(reason={formal_decision.reason_code}, "
-            f"mode={hybrid_mode if execution_path == 'hybrid' else 'n/a'}, "
             f"pii={pii_types or 'none'}, "
             f"inj={formal_decision.classifier_tags.injection_risk})"
         )
@@ -205,41 +186,35 @@ class RelayOrchestrator:
             }
 
         # ── Stage 2: Hybrid — external inference ─────────────────────────────
-        # Both selective and synthesis send the reformulated query to the external model.
         t0 = time.time()
         external_answer, blocked = await _run_external()
         timings["external_ms"] = (time.time() - t0) * 1000
         log_event(trace_id, "external", raw_input=external_query, raw_output=external_answer,
                   provider=self.config.external_provider, latency_ms=timings["external_ms"],
                   safety_flags={"blocked": blocked})
-        print(f"[Stage 2] External ({hybrid_mode}): {len(external_answer)} chars ({timings['external_ms']:.0f}ms)")
+        print(f"[Stage 2] External: {len(external_answer)} chars ({timings['external_ms']:.0f}ms)")
 
         if blocked or not external_answer:
-            # External failed — fall back to local
             t0 = time.time()
             final_answer = await local_provider.generate_async_messages(main_messages) or ""
             timings["local_ms"] = (time.time() - t0) * 1000
             print(f"[Stage 2] Fallback to local: {len(final_answer)} chars")
         else:
-            # ── Stage 3: Local binding / synthesis ───────────────────────────
-            # selective: lightweight binding — adapt external answer to original context
-            # synthesis: deep synthesis — apply external knowledge to original personal situation
-            prompt_template = SYNTHESIS_PROMPT if hybrid_mode == "synthesis" else BINDING_PROMPT
-            temperature = 0.4 if hybrid_mode == "synthesis" else 0.3
+            # ── Stage 3: Local — apply external answer to original context ────
             t0 = time.time()
-            local_prompt = prompt_template.format(
+            local_prompt = LOCAL_PROMPT.format(
                 original_query=user_query,
                 external_answer=external_answer,
             )
             final_answer = await self.ollama.chat(
                 [{"role": "system", "content": local_prompt},
                  {"role": "user", "content": "Write the final answer now."}],
-                temperature=temperature,
+                temperature=0.35,
             ) or external_answer
             timings["local_ms"] = (time.time() - t0) * 1000
-            log_event(trace_id, hybrid_mode, raw_input=f"ext={external_answer[:100]}",
+            log_event(trace_id, "local_synthesis", raw_input=f"ext={external_answer[:100]}",
                       raw_output=final_answer, provider="local", latency_ms=timings["local_ms"])
-            print(f"[Stage 3] {hybrid_mode.capitalize()}: {len(final_answer)} chars ({timings['local_ms']:.0f}ms)")
+            print(f"[Stage 3] Local synthesis: {len(final_answer)} chars ({timings['local_ms']:.0f}ms)")
 
         if session_id:
             append_main_turn(session_id, user=user_query, assistant=final_answer)

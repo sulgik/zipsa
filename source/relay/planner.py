@@ -45,14 +45,9 @@ from source.relay.router import (
 
 # ── Task types that prefer external vs local ───────────────────────────────────
 
-# Tasks that need local synthesis after external call (personal context must be applied)
-SYNTHESIS_PREFERRED_TASKS = frozenset({
+EXTERNAL_PREFERRED_TASKS = frozenset({
     "domain_knowledge",
     "analysis_evaluation",
-})
-
-# Tasks where external answer is complete on its own (no personalization needed)
-SELECTIVE_PREFERRED_TASKS = frozenset({
     "code_technical",
     "text_rewrite",
     "structured_generation",
@@ -60,8 +55,6 @@ SELECTIVE_PREFERRED_TASKS = frozenset({
     "simple_instruction",
     "other",
 })
-
-EXTERNAL_PREFERRED_TASKS = SYNTHESIS_PREFERRED_TASKS | SELECTIVE_PREFERRED_TASKS
 
 LOCAL_PREFERRED_TASKS = frozenset({
     "roleplay_persona",
@@ -100,31 +93,22 @@ INJECTION_PATTERNS: List[re.Pattern] = [
     re.compile(r'(admin\s+mode|root\s+access|bypass\s+(safety|filter|restrict|security))', re.IGNORECASE),
     re.compile(r'(reveal|leak|expose|print)\s+(system|your|the)\s+(prompt|instructions?|rules?)', re.IGNORECASE),
     # ── Korean injection patterns (particle-agnostic) ─────────────────────────
-    # "이전의 모든 지시/지침/규칙/보안 설정을 무시" — particle-tolerant
     re.compile(r'이전.{0,15}(지시|지침|규칙|보안|설정).{0,10}무시', re.IGNORECASE),
-    # "모든 보안/규칙/지침을 무시" — even without 이전
     re.compile(r'모든.{0,10}(보안|지침|규칙|제약|제한).{0,10}무시', re.IGNORECASE),
-    # "시스템 프롬프트" is itself a red flag (users don't say this normally)
     re.compile(r'시스템\s*(프롬프트|지시|규칙)', re.IGNORECASE),
-    # "안전/보안 필터/제약/규칙 우회/해제/무시/없는/없이"
     re.compile(r'(안전|보안).{0,10}(필터|제약|규칙|지침).{0,10}(우회|해제|무시|없는|없이)', re.IGNORECASE),
     re.compile(r'(필터|제약|제한).{0,5}(없는|없이|해제|우회)', re.IGNORECASE),
-    # "자유로운 AI" / "제한 없는 AI" — claims of being an unrestricted AI
     re.compile(r'(자유로운|제한\s*없는|무제한|무필터).{0,10}AI', re.IGNORECASE),
-    # "모든 제약 해제" / "제한 없이"
     re.compile(r'모든\s*(제약|제한|규칙)\s*(해제|무시|없이)', re.IGNORECASE),
 ]
 
 EXFILTRATION_PATTERNS: List[re.Pattern] = [
     # ── English ───────────────────────────────────────────────────────────────
-    # "send/forward/upload ... data/info" — allow arbitrary words in between
     re.compile(r'(send|email|post|upload|forward)\b.{0,40}(user\s+data|private\s+data|all\s+(?:the\s+)?data|personal\s+(?:info|data)|pii\s+data)', re.IGNORECASE),
-    # "send/forward ... conversation/context"
     re.compile(r'(send|forward|share|transmit)\b.{0,25}(conversation|context|session|message\s+history)', re.IGNORECASE),
     re.compile(r'(print|output|display|return)\s+(the|all|my|user|binding)\s+(pii|data|map|context|secrets?)', re.IGNORECASE),
     re.compile(r'(what\s+is|tell\s+me|show\s+me)\s+(my|the|user|their)\s+(real|actual|original)\s+(name|id|phone|email)', re.IGNORECASE),
     re.compile(r'\b(binding[\s_]?map|placeholder[\s_]?map|original[\s_]?value)\b', re.IGNORECASE),
-    # "leak/expose the data"
     re.compile(r'(leak|expose|exfiltrate|steal)\s+.{0,20}(user|private|pii|personal|original)\s+(data|info|values?)', re.IGNORECASE),
     # ── Korean exfiltration ───────────────────────────────────────────────────
     re.compile(r'(실제\s*값|원래\s*이름|바인딩\s*맵|개인정보\s*전달|원본\s*데이터)', re.IGNORECASE),
@@ -132,15 +116,6 @@ EXFILTRATION_PATTERNS: List[re.Pattern] = [
 ]
 
 # ── Natural language PII signals (sentence-level, no structured format) ────────
-#
-# Problem: regex-based PII scan (safety.scan_and_redact) only detects structured
-# tokens (email, phone, RRN, credit card, API key). Sensitive info embedded in
-# natural language — Korean names in sentences, salary amounts, first-person medical
-# context — passes through undetected and can be mis-routed to external.
-#
-# These patterns catch the most common forms of sentence-level PII without requiring
-# a structured token match. False-positive risk is deliberately conservative (a
-# privacy gateway should err on the side of caution).
 #
 # Coverage:
 #   KO-1  Salary/compensation with amount      "연봉 1억 2천", "급여가 350만원"
@@ -220,7 +195,6 @@ class PlannerProposal:
     decision: str = "local_only"        # "local_only" | "hybrid"
     reason_code: str = "privacy_risk"   # controlled vocabulary (see below)
     proposed_external_task: Optional[Dict[str, Any]] = None
-    hybrid_mode: str = "synthesis"  # "synthesis" | "selective"
 
     # Valid reason_codes:
     #   needs_external_knowledge  — task benefits from external LLM
@@ -250,7 +224,6 @@ class FormalPlannerDecision:
     decision: str = "local_only"        # "local_only" | "hybrid"
     reason_code: str = "privacy_risk"
     proposed_external_task: Optional[Dict[str, Any]] = None
-    hybrid_mode: str = "synthesis"  # "synthesis" | "selective"
     classifier_tags: ClassifierTags = field(default_factory=ClassifierTags)
     validation_passed: bool = True
     validation_notes: List[str] = field(default_factory=list)
@@ -307,17 +280,15 @@ def classify(
     tags.crisis_risk = any(p.search(query) for p in CRISIS_PATTERNS)
 
     # Natural language PII signal (sentence-level, independent of regex scan)
-    # Catches: Korean name contexts, salary with amounts, first-person PII disclosure, etc.
     tags.nl_pii_detected = any(p.search(query) for p in NL_PII_PATTERNS)
 
-    # Task type — same priority order as route_heuristic, plus security checks first
+    # Task type — priority order: security checks first, then task signals
     if tags.crisis_risk:
         tags.task_type = "crisis_sensitive"
         tags.task_confidence = "high"
         tags.task_kind = "other"
 
     elif tags.pii_sensitivity >= sensitivity_threshold and pii_types:
-        # Structured PII detected with high severity (regex scan)
         tags.task_type = "pii_dependent"
         tags.task_confidence = "high"
         tags.task_kind = "other"
@@ -335,12 +306,8 @@ def classify(
     elif (pii_detected or tags.nl_pii_detected) and any(
         kw.lower() in query.lower() for kw in PII_CONTENT_KEYWORDS
     ):
-        # PII present + sensitive keyword (password, account number, salary, …).
-        # If a domain knowledge signal is ALSO present, let domain_knowledge win —
-        # the PII is incidental context (e.g. phone number + T2DM treatment question),
-        # not the answer being requested. Reformulation strips identifiers; post-reformulation
-        # PII scan in the orchestrator is the final safety gate.
-        # Without a domain signal, the PII IS likely the answer → pii_dependent.
+        # PII present + sensitive keyword. If domain knowledge signal is also present,
+        # let domain_knowledge win — PII is incidental context, reformulator strips it.
         domain_hits = sum(1 for p in DOMAIN_KNOWLEDGE_PATTERNS if p.search(query))
         if domain_hits >= 1:
             tags.task_type = "domain_knowledge"
@@ -352,18 +319,11 @@ def classify(
             tags.task_kind = "other"
 
     elif sum(1 for p in DOMAIN_KNOWLEDGE_PATTERNS if p.search(query)) >= 1:
-        # Domain knowledge task (medical / legal / financial).
-        # Even when nl_pii context is present, reformulation can abstract personal identifiers
-        # while keeping task-relevant parameters (lab values, medications, legal clauses).
-        # Post-reformulation PII scan in the orchestrator is the final safety gate.
         tags.task_type = "domain_knowledge"
         tags.task_confidence = "medium"
         tags.task_kind = TASK_KIND_MAP["domain_knowledge"]
 
     elif tags.nl_pii_detected:
-        # Natural language PII without a clear external-knowledge task signal.
-        # (e.g. "연봉 1억 2천 인상 적절해?" — salary advice, local LLM handles well)
-        # Conservative: treat as pii_dependent.
         tags.task_type = "pii_dependent"
         tags.task_confidence = "medium"
         tags.task_kind = "other"
@@ -396,17 +356,10 @@ def propose(tags: ClassifierTags, sanitize_safe: bool) -> PlannerProposal:
       1. Security risks (injection/exfiltration/crisis) → local_only / security_override
       2. Sanitization failed                            → local_only / privacy_risk
       3. Local-preferred task type (pii_dependent, etc.)→ local_only / sufficient_local_context
-      4. External-preferred task type (domain_knowledge, code, …) → hybrid / needs_external_knowledge
+      4. External-preferred task type                   → hybrid / needs_external_knowledge
       5. Default                                        → local_only / sufficient_local_context
 
-    PII severity is NOT checked here — it is enforced downstream via post-reformulation
-    PII scan in the orchestrator. This means a high-PII query (e.g. SSN + domain knowledge)
-    can be proposed as hybrid; the reformulator must strip all PII, and the output scan
-    verifies it. If any PII leaks through, the orchestrator falls back to local automatically.
-
-    Task type already handles the identity-bound case:
-      pii_dependent (SSN IS the answer, or identity-bound query) → local_only here.
-      domain_knowledge with incidental SSN → hybrid → reformulate → scan → send or fall back.
+    PII severity is NOT checked here — enforced downstream via post-reformulation PII scan.
     """
     # 1. Security override (highest priority)
     if tags.injection_risk == "high" or tags.exfiltration_risk:
@@ -439,13 +392,11 @@ def propose(tags: ClassifierTags, sanitize_safe: bool) -> PlannerProposal:
             proposed_external_task=None,
         )
 
-    # 4. External-preferred tasks → hybrid (post-reformulation PII scan verifies safety)
+    # 4. External-preferred tasks → hybrid
     if tags.task_type in EXTERNAL_PREFERRED_TASKS:
-        hybrid_mode = "synthesis" if tags.task_type in SYNTHESIS_PREFERRED_TASKS else "selective"
         return PlannerProposal(
             decision="hybrid",
             reason_code="needs_external_knowledge",
-            hybrid_mode=hybrid_mode,
             proposed_external_task={
                 "kind": tags.task_kind,
                 "task_type": tags.task_type,
@@ -513,8 +464,6 @@ def validate(
         notes.append(f"INV-5: medium injection risk ({tags.injection_hit_count} pattern) — monitoring")
 
     # INV-6: medium injection + any PII present → potential assisted-exfiltration attack
-    # Rationale: an injection attempt combined with PII in the query suggests the attacker
-    # may be trying to override safety rules to extract the bound PII values externally.
     if tags.injection_risk == "medium" and tags.pii_types and p.decision == "hybrid":
         p = PlannerProposal(decision="local_only", reason_code="security_override")
         notes.append(
@@ -538,30 +487,14 @@ def plan(
     """
     Full 3-layer planning pipeline: classify → propose → validate → finalize.
 
-    Parameters
-    ----------
-    query               : raw (pre-sanitization) user query
-    pii_types           : PII type tokens detected by safety guard (e.g. ["ID", "NAME"])
-    pii_detected        : whether any PII was detected at all
-    sanitize_safe       : True if sanitization passed quality gate
-    sensitivity_threshold: PII severity score above which external is forbidden
-
-    Returns
-    -------
-    FormalPlannerDecision with:
-      decision == "hybrid"     → orchestrator should call reformulate() then run external
+    Returns FormalPlannerDecision with:
+      decision == "hybrid"     → orchestrator calls reformulate() then runs external
       decision == "local_only" → orchestrator skips external call entirely
     """
-    # Layer 1
     tags = classify(query, pii_types, pii_detected, sensitivity_threshold)
-
-    # Layer 2
     proposal = propose(tags, sanitize_safe)
-
-    # Layer 3
     validated, validation_passed, validation_notes = validate(proposal, tags)
 
-    # Translate to route
     if validated.decision == "hybrid":
         route = "external"
         forced_local = False
@@ -578,19 +511,17 @@ def plan(
     reason_parts = [f"[Formal/{validated.reason_code}] {tags.task_type} → {validated.decision}"]
     if validation_notes:
         reason_parts.append("| " + "; ".join(validation_notes))
-    reason = " ".join(reason_parts)
 
     return FormalPlannerDecision(
         route=route,
         category=tags.task_type,
         confidence=tags.task_confidence,
-        reason=reason,
+        reason=" ".join(reason_parts),
         sensitivity_score=tags.pii_sensitivity,
         forced_local=forced_local,
         decision=validated.decision,
         reason_code=validated.reason_code,
         proposed_external_task=validated.proposed_external_task,
-        hybrid_mode=validated.hybrid_mode,
         classifier_tags=tags,
         validation_passed=validation_passed,
         validation_notes=validation_notes,
