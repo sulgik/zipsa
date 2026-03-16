@@ -130,14 +130,13 @@ The reformulated query is then scanned for PII before it leaves the local enviro
 
 ## Dual-Context Conversation Model
 
-In Zipsa, a single conversation can carry two different kinds of context at the same time:
+Multi-turn conversations create a problem that single-turn routing does not have. Over several turns, a conversation accumulates personal context — a patient's name, diagnosis, medications, prior decisions. If every assistant turn is sent to the external model as part of the next request's history, the cumulative context leaks even when individual turns were safe. Conversely, if you drop all history before each external call, the external model loses continuity and gives worse answers.
 
-- the **main conversation**, which may contain identity-bound or sensitive details and must stay local
-- the **external-safe conversation**, which should contain only the information that can safely leave the trusted zone
+The naive fix — maintain a single "sanitized" history by redacting or summarizing every turn — fails in practice. A local-only turn (e.g., confirming a patient's identity) may have no meaningful safe representation; forcing a summary risks either leaking the original or producing a meaningless placeholder that breaks the external model's coherence.
 
-The challenge is that these two context lanes do not evolve in lockstep. A local-only turn may be important for the real conversation, but it may have no safe external representation at all. If you try to mirror every turn into a single "sanitized history," you risk either leaking raw context or forcing unnatural summaries.
+The correct framing is that a multi-turn conversation naturally splits into two tracks with different privacy requirements: the full conversation including all personal context, and a parallel track that contains only what was safe to send externally. These two tracks diverge whenever a local-only turn occurs and re-converge on hybrid turns. They cannot be collapsed into one.
 
-With a stable `session_id`, Zipsa solves this by maintaining **two linked threads per session**:
+Zipsa solves this with **two linked threads per session**:
 
 ```text
 Session state
@@ -152,7 +151,7 @@ Session state
     └── Turn 2 user:  (only added if this turn is hybrid)
 ```
 
-On each new turn, the local planning step can see the **main thread** inside the trusted zone. If it selects hybrid execution, it reformulates the current raw message into an external-safe query and appends that turn to the **sub-thread**. Local-only turns stay in the main thread only; they are not mirrored into the external thread. When a client sends a plain OpenAI-style `messages` array without `session_id`, Zipsa falls back to reconstructing a temporary external-safe context instead of using this persisted two-thread session model.
+On each new turn, the local planning step sees the full **main thread** inside the trusted zone. If it selects hybrid, it reformulates the current message into an external-safe query and appends that turn to the **sub-thread** — this is the only history the external model ever sees. Local-only turns are never mirrored into the sub-thread. When a client sends a plain OpenAI-style `messages` array without `session_id`, Zipsa reconstructs a temporary external-safe context per-request instead of using this persisted two-thread model.
 
 ## ✨ Key Features
 
