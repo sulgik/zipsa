@@ -42,9 +42,7 @@ graph LR
         FP -->|local_only| L1[Local LLM<br/>answer]
         FP -->|"hybrid:<br/>reformulate"| PV[PII Scan<br/>verify output]
         PV -->|"leaked → fallback"| L1
-        FP -->|"synthesis mode<br/>concurrent"| L2[Local LLM<br/>direct answer]
-        L2 --> Synth[Local LLM<br/>bind / synthesize]
-        EK[External<br/>Knowledge] --> Synth
+        Synth[Local LLM<br/>bind / synthesize]
         Synth --> FA([Final Answer])
         L1 --> FA
     end
@@ -54,8 +52,7 @@ graph LR
     end
 
     PV -->|"clean · depersonalized only"| EXT
-    EXT -->|"selective mode"| Synth
-    EXT --> EK
+    EXT --> Synth
 
     style TZ fill:#f0f6ff,stroke:#1f6feb,color:#1f2328
     style Cloud fill:#fff8f0,stroke:#b35c00,color:#1f2328
@@ -82,16 +79,12 @@ User query (original, with private context)
   │         INV-6: medium injection + PII     → force local_only (exfiltration assist)
   │     1e. If hybrid: Local LLM reformulates query → PII scan on output → send or fall back
   │
-  ├─ Stage 2: Inference  [hybrid only — two modes]
-  │     selective  (code, text rewrite, structured generation, …)
-  │       External LLM ← reformulated query
-  │     synthesis  (domain knowledge, analysis)
-  │       Local LLM    ← original query  (concurrent)
-  │       External LLM ← reformulated query  (concurrent)
+  ├─ Stage 2: Inference  [hybrid only]
+  │     External LLM ← reformulated query
   │
   └─ Stage 3: Local binding / synthesis  [both hybrid modes]
         selective  → Local LLM applies original context to external answer (binding)
-        synthesis  → Local answer + external knowledge → personalized final answer
+        synthesis  → Local LLM applies external knowledge to original personal context (synthesis)
 ```
 
 ### Routing Logic

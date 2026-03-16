@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 import time
 from typing import Dict, Any, Optional
@@ -24,17 +23,15 @@ SYNTHESIS_PROMPT = """You are the final synthesis step of a local privacy gatewa
 ORIGINAL QUESTION:
 {original_query}
 
-LOCAL MODEL RESPONSE:
-{local_answer}
-
 EXTERNAL KNOWLEDGE (answered on an anonymized version of the question):
 {external_answer}
 
 INSTRUCTIONS:
-1. Use the external knowledge as the evidence base; apply it to the specific situation in the original question.
-2. Do not repeat or surface identifiers (SSNs, account numbers, contact details) in the answer.
-3. Do not add privacy warnings, disclaimers, or alerts — the gateway already handles that.
-4. Respond in the SAME LANGUAGE as the original question.
+1. Use the external knowledge as the evidence base; apply it to the specific personal situation described in the original question.
+2. Provide a thorough, personalized answer that directly addresses the user's specific context and needs.
+3. Do not repeat or surface identifiers (SSNs, account numbers, contact details) in the answer.
+4. Do not add privacy warnings, disclaimers, or alerts — the gateway already handles that.
+5. Respond in the SAME LANGUAGE as the original question.
 
 Write the final answer now:"""
 
@@ -265,52 +262,47 @@ class RelayOrchestrator:
                 "trace_id": trace_id,
             }
 
-        # ── Synthesis hybrid: concurrent local + external → local synthesizes ─
+        # ── Synthesis hybrid: external → local synthesizes with full original context ─
         # Best for domain knowledge, analysis — external provides expert knowledge,
         # local applies it to the user's specific personal context.
-        async def _run_local() -> str:
-            return await local_provider.generate_async_messages(main_messages) or ""
-
         t0 = time.time()
-        local_answer, (external_answer, blocked) = await asyncio.gather(
-            _run_local(), _run_external()
-        )
-        parallel_ms = (time.time() - t0) * 1000
-        timings["local_ms"] = parallel_ms
-        timings["external_ms"] = parallel_ms
-        log_event(trace_id, "local_direct", raw_input=user_query, raw_output=local_answer,
-                  provider="local", latency_ms=parallel_ms)
+        external_answer, blocked = await _run_external()
+        timings["external_ms"] = (time.time() - t0) * 1000
         log_event(trace_id, "external_knowledge", raw_input=external_query, raw_output=external_answer,
-                  provider=self.config.external_provider, latency_ms=parallel_ms,
+                  provider=self.config.external_provider, latency_ms=timings["external_ms"],
                   safety_flags={"blocked": blocked})
-        print(
-            f"[Stage 2] Synthesis — local: {len(local_answer)} chars | "
-            f"external: {len(external_answer)} chars ({parallel_ms:.0f}ms)"
-        )
+        print(f"[Stage 2] Synthesis external: {len(external_answer)} chars ({timings['external_ms']:.0f}ms)")
 
-        # ── Stage 3: Local synthesis ──────────────────────────────────────────
-        t0 = time.time()
-        synthesis_text = SYNTHESIS_PROMPT.format(
-            original_query=user_query,
-            local_answer=local_answer,
-            external_answer=external_answer,
-        )
-        final_answer = await self.ollama.chat(
-            [{"role": "system", "content": synthesis_text},
-             {"role": "user", "content": "Write the final answer now."}],
-            temperature=0.4,
-        )
-        timings["synthesis_ms"] = (time.time() - t0) * 1000
-        log_event(
-            trace_id, "synthesis",
-            raw_input=f"local={local_answer[:100]}|ext={external_answer[:100]}",
-            raw_output=final_answer, provider="local",
-            latency_ms=timings["synthesis_ms"],
-        )
+        if blocked or not external_answer:
+            # External failed — fall back to local
+            t0 = time.time()
+            final_answer = await local_provider.generate_async_messages(main_messages) or ""
+            timings["local_ms"] = (time.time() - t0) * 1000
+            print(f"[Stage 2] Synthesis fallback to local: {len(final_answer)} chars")
+        else:
+            # ── Stage 3: Local synthesis ──────────────────────────────────────────
+            t0 = time.time()
+            synthesis_text = SYNTHESIS_PROMPT.format(
+                original_query=user_query,
+                external_answer=external_answer,
+            )
+            final_answer = await self.ollama.chat(
+                [{"role": "system", "content": synthesis_text},
+                 {"role": "user", "content": "Write the final answer now."}],
+                temperature=0.4,
+            ) or external_answer
+            timings["synthesis_ms"] = (time.time() - t0) * 1000
+            log_event(
+                trace_id, "synthesis",
+                raw_input=f"ext={external_answer[:100]}",
+                raw_output=final_answer, provider="local",
+                latency_ms=timings["synthesis_ms"],
+            )
+            print(f"[Stage 3] Synthesis: {len(final_answer)} chars ({timings['synthesis_ms']:.0f}ms)")
 
         if session_id:
             append_main_turn(session_id, user=user_query, assistant=final_answer)
-            if external_query:
+            if external_query and not blocked:
                 append_sub_turn(session_id, user=external_query, assistant=external_answer)
 
         total_latency = (time.time() - start_time) * 1000
@@ -320,7 +312,7 @@ class RelayOrchestrator:
             "final_answer": final_answer,
             "steps": {
                 "reformulated_query": external_query,
-                "local_answer": local_answer,
+                "local_answer": None,
                 "external_answer": external_answer,
             },
             "provider": self.config.external_provider,
