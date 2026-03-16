@@ -38,6 +38,23 @@ INSTRUCTIONS:
 
 Write the final answer now:"""
 
+BINDING_PROMPT = """You are the final binding step of a local privacy gateway. The original question may contain personal context that was stripped before the external model answered. Your job is to take the external answer and apply it back to the original question — filling in any personal specifics, adjusting references, and ensuring the answer directly addresses what the user actually asked.
+
+ORIGINAL QUESTION:
+{original_query}
+
+EXTERNAL ANSWER (produced from an anonymized version of the question):
+{external_answer}
+
+INSTRUCTIONS:
+1. Return the external answer adapted to the original question. Adjust any generic references to match the user's actual context where relevant.
+2. Do not repeat or surface identifiers (SSNs, account numbers, contact details) in the answer.
+3. Do not add privacy warnings, disclaimers, or alerts.
+4. If the external answer already fully addresses the original question without adaptation, return it as-is.
+5. Respond in the SAME LANGUAGE as the original question.
+
+Write the final answer now:"""
+
 
 class RelayOrchestrator:
     def __init__(self, config=None):
@@ -196,9 +213,10 @@ class RelayOrchestrator:
             }
 
         if hybrid_mode == "selective":
-            # ── Selective hybrid: reformulate → external only, no synthesis ───
-            # Best for code, text rewrite, structured generation — external answer
-            # is self-contained; personalization via synthesis adds no value.
+            # ── Selective hybrid: reformulate → external → local binding ─────
+            # Best for code, text rewrite, structured generation.
+            # External answers the anonymized query; local binding step re-applies
+            # the original personal context so the answer addresses the actual question.
             t0 = time.time()
             external_answer, blocked = await _run_external()
             timings["external_ms"] = (time.time() - t0) * 1000
@@ -213,8 +231,23 @@ class RelayOrchestrator:
                 timings["local_ms"] = (time.time() - t0) * 1000
                 print(f"[Stage 2] Selective fallback to local: {len(final_answer)} chars")
             else:
-                final_answer = external_answer
                 print(f"[Stage 2] Selective external: {len(external_answer)} chars ({timings['external_ms']:.0f}ms)")
+                # Stage 3 (binding): local LLM applies original context to external answer
+                t0 = time.time()
+                binding_text = BINDING_PROMPT.format(
+                    original_query=user_query,
+                    external_answer=external_answer,
+                )
+                final_answer = await self.ollama.chat(
+                    [{"role": "system", "content": binding_text},
+                     {"role": "user", "content": "Write the final answer now."}],
+                    temperature=0.3,
+                ) or external_answer
+                timings["binding_ms"] = (time.time() - t0) * 1000
+                log_event(trace_id, "binding", raw_input=f"ext={external_answer[:100]}",
+                          raw_output=final_answer, provider="local",
+                          latency_ms=timings["binding_ms"])
+                print(f"[Stage 3] Binding: {len(final_answer)} chars ({timings['binding_ms']:.0f}ms)")
 
             if session_id:
                 append_main_turn(session_id, user=user_query, assistant=final_answer)
