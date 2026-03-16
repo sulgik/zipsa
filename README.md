@@ -66,11 +66,11 @@ graph LR
 ```text
 User query (original, with private context)
   │
-  ├─ Stage 1: Formal planning  (3-layer pipeline, no LLM for routing)
+  ├─ Stage 1: Formal planning  (no LLM for routing decisions)
   │     1a. PII scan    — deterministic regex → pii_types, pii_detected
   │     1b. Classifier  — tag extraction: task_type, injection_risk, exfiltration_risk,
   │                        nl_pii_detected (sentence-level PII signals, English + Korean)
-  │     1c. Planner     — propose decision: local_only | hybrid
+  │     1c. Planner     — propose decision: local_only | hybrid (selective | synthesis)
   │                        priority order: security → task type
   │     1d. Validator   — enforce policy invariants (monotonic downgrade only)
   │         INV-2: injection_risk=high        → force local_only
@@ -79,17 +79,19 @@ User query (original, with private context)
   │         INV-6: medium injection + PII     → force local_only (exfiltration assist)
   │     1e. If hybrid: Local LLM reformulates query → PII scan on output → send or fall back
   │
-  ├─ Stage 2: Inference  [hybrid only]
-  │     External LLM ← reformulated query
+  ├─ Stage 2: External inference  [hybrid only]
+  │     External LLM answers the reformulated (depersonalized) query
   │
-  └─ Stage 3: Local binding / synthesis  [both hybrid modes]
-        selective  → Local LLM applies original context to external answer (binding)
-        synthesis  → Local LLM applies external knowledge to original personal context (synthesis)
+  └─ Stage 3: Local binding / synthesis  [hybrid only]
+        selective  (code, text rewrite, structured generation)
+          Local LLM re-applies original personal context to the external answer
+        synthesis  (domain knowledge, analysis)
+          Local LLM applies external knowledge to the original personal situation
 ```
 
 ### Routing Logic
 
-The formal planner routes each query to one of two paths, then enforces privacy at the reformulation output rather than upfront:
+The formal planner routes each query, then enforces privacy at the reformulation output rather than upfront:
 
 ```text
 Classify → Propose → Validate → [if hybrid] Reformulate → PII scan output → [clean] send | [leaked] fall back to local
@@ -100,6 +102,11 @@ Hybrid is proposed when:
 - Task type is `domain_knowledge`, `code_technical`, `text_rewrite`, or similar external-preferred types
 - No injection or exfiltration pattern detected
 - Query is not identity-bound (`pii_dependent`, `crisis_sensitive`, `roleplay_persona` always stay local)
+
+Within hybrid, the mode is determined by task type:
+
+- **synthesis** — `domain_knowledge`, `analysis_evaluation`: external knowledge + original personal context → deep personalized answer
+- **selective** — `code_technical`, `text_rewrite`, `structured_generation`, etc.: external answer + original context → lightly adapted answer
 
 The reformulated query is then scanned for PII before it leaves the local environment. If any PII is detected in the output, the turn falls back to local automatically — no partial or ambiguous sends.
 
