@@ -155,10 +155,28 @@ On each new turn, the local planning step sees the full **main thread** inside t
 
 ## Privacy & Utility
 
-Measured on 8 test queries (healthcare, legal, financial, code, identity-bound, injection attempt) using Gemini as the external provider and qwen3.5:9b as the local model.
+Two complementary evaluations using Gemini as the external provider and qwen3.5:9b as the local model.
 
 **Privacy** — percentage of queries where no PII reached the external provider.
 **Utility** — LLM judge score (1–5) assessing whether the answer correctly and helpfully addressed the original question.
+
+### Large-scale privacy evaluation (N=325)
+
+Evaluated on [benchmark_mimic_v1](06_qa/benchmark_dataset/generated/benchmark_mimic_v1.json), a 325-case synthetic medical dataset covering appointment scheduling, prescription renewal, symptom assessment, treatment recommendation, and record access across multiple PII risk types (name, phone, address, patient ID, SSN, DOB).
+
+Stage 1 only (routing + reformulation) — no external LLM call is made for this evaluation.
+
+| Condition | Privacy (no PII leak) | Routing accuracy |
+| --------- | --------------------- | ---------------- |
+| Local-only (no external) | **100%** | — |
+| **Zipsa** | **100%** | **98.5%** (320/325) |
+| External-direct (no privacy) | 63.1% | — |
+
+Zipsa achieved **0 PII leaks** across all 325 cases. External-direct exposed PII in 37% of queries (120/325) where identifiers (name, phone, address, ID, SSN) were detectable by the privacy scanner.
+
+### Utility evaluation (N=8)
+
+Full end-to-end evaluation across healthcare, legal, financial, code, identity-bound, and injection-attempt queries.
 
 | Condition | Privacy (no PII leak) | Utility (avg 1–5) |
 | --------- | --------------------- | ----------------- |
@@ -170,7 +188,7 @@ Zipsa matches the utility of sending queries directly to an external model while
 
 **Routing accuracy** (correct local/hybrid decision): **8/8** — including injection attempts that the LLM classifier misclassified as hybrid but the deterministic validator correctly blocked to local.
 
-> Test set and benchmark script: [`run_benchmark.py`](run_benchmark.py)
+> Benchmark scripts: [`run_benchmark.py`](run_benchmark.py) (N=8 full pipeline), [`run_benchmark_v2.py`](run_benchmark_v2.py) (N=325 Stage 1 privacy)
 
 ## ✨ Key Features
 
