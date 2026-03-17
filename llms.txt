@@ -1,0 +1,75 @@
+# Zipsa
+> Local-first privacy gateway for LLM apps.
+
+## Summary
+Zipsa is a FastAPI service that sits between an OpenAI-compatible client and an external model provider. It uses a local Ollama model plus privacy-aware planning to keep identity-bound, confidential, or secret-bearing requests local. For hybrid requests, it reformulates the prompt into an external-safe version, calls Anthropic, Gemini, or OpenAI, then synthesizes the final answer locally.
+
+Sensitive data is treated broadly. That includes personal data, customer data, contracts, credentials, source code, incident details, pricing, and internal strategy, not just classic PII.
+
+## Capabilities
+- OpenAI-compatible endpoint: `/v1/chat/completions` with model `zipsa`
+- Native endpoint: `/relay`
+- Health check: `/health`
+- Recent request log: `/logs`
+- Multi-turn sessions via `session_id`
+- Local-first handling for personal, business, and security-sensitive context
+- Hybrid inference for technical, legal, clinical, and operational knowledge that can be safely abstracted
+
+## Runtime
+- Python + FastAPI
+- Local model via Ollama: `LOCAL_MODEL` (default `qwen3.5:9b`)
+- Local Ollama host: `LOCAL_HOST` (default `http://localhost:11434`)
+- External provider: `EXTERNAL_PROVIDER` in `anthropic`, `gemini`, or `openai`
+- Model env vars: `CLAUDE_MODEL`, `GEMINI_MODEL`, `OPENAI_MODEL`
+- `DEMO_MODE=true` skips bearer auth on `/relay`
+
+## Quick Start
+```bash
+cp .env.example .env
+ollama pull qwen3.5:9b
+docker-compose up -d
+curl http://localhost:8000/health
+```
+
+## Client Usage
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8000/v1",
+    api_key="zipsa-key",
+)
+
+response = client.chat.completions.create(
+    model="zipsa",
+    messages=[{
+        "role": "user",
+        "content": "An enterprise renewal is at risk over discount pressure and SLA demands. What options preserve margin while improving close probability?",
+    }],
+    extra_body={"session_id": "case-001"},
+)
+```
+
+## Request Flow
+1. Scan locally for PII, credentials, and other high-risk markers.
+2. Decide whether the request should stay local or go hybrid.
+3. If hybrid, rewrite the request to remove identifying and proprietary details.
+4. Call the external provider only with the rewritten query.
+5. Apply the external answer back to the original local context.
+
+## Key Files
+- `README.md`: product overview, examples, setup
+- `main.py`: FastAPI app, `/relay`, `/health`
+- `source/adapters/openai_compat.py`: OpenAI-compatible API
+- `source/relay/orchestrator.py`: routing, reformulation, external call, local synthesis
+- `source/relay/ollama.py`: local model client and query reformulation
+- `source/relay/safety.py`: regex-based sensitive-data scan
+- `source/relay/planner.py`: formal planning and route decision
+- `source/relay/router.py`: routing heuristics and sensitivity scoring
+- `LICENSE`: Business Source License 1.1
+
+## Notes For Agents
+- Prefer the OpenAI-compatible API unless you specifically need the structured `/relay` response.
+- Pass a stable `session_id` for multi-turn work.
+- The OpenAI-compatible adapter appends a routing footer to assistant output.
+- Do not assume "sensitive" means only PII. Internal business and security context also counts.
