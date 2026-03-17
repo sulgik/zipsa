@@ -475,6 +475,98 @@ def validate(
     return p, passed, notes
 
 
+# ── LLM-based classification ───────────────────────────────────────────────────
+
+_LLM_CLASSIFY_PROMPT = """You are a query router for a local privacy gateway. Classify the query and decide whether external AI knowledge is needed.
+
+VALID task_type values (pick exactly one):
+  domain_knowledge      medical, legal, financial, scientific expertise questions
+  analysis_evaluation   comparing options, evaluating tradeoffs, strategic analysis
+  code_technical        code, debugging, technical implementation
+  text_rewrite          editing, translating, rephrasing existing text
+  structured_generation generating documents, forms, reports, tables
+  information_request   factual lookup, general knowledge
+  simple_instruction    short, clear request needing no expertise
+  pii_dependent         the PII itself IS the answer (e.g. "look up John's SSN")
+  roleplay_persona      persona, character, or role-play request
+  crisis_sensitive      self-harm, abuse, emergency situations
+  other                 none of the above
+
+DECISION rules:
+  hybrid     — task type benefits from external expertise AND an anonymized version
+               of the question can meaningfully capture the knowledge need
+  local_only — the answer IS the private data, the query is identity-bound, or
+               external knowledge adds nothing beyond what a local model can do
+
+Output ONLY a JSON object, no explanation:
+{"task_type": "<value>", "decision": "hybrid"|"local_only", "reason_code": "needs_external_knowledge"|"sufficient_local_context"|"privacy_risk"}
+
+EXAMPLES:
+Query: "Jane Smith (SSN 123-45-6789) has T2DM, HbA1c 8.4% on metformin. Next treatment?"
+Output: {"task_type": "domain_knowledge", "decision": "hybrid", "reason_code": "needs_external_knowledge"}
+
+Query: "Look up John's SSN 123-45-6789 and get his insurance policy number."
+Output: {"task_type": "pii_dependent", "decision": "local_only", "reason_code": "sufficient_local_context"}
+
+Query: "My name is Sarah, email sarah@acme.com. Write a Python CSV parser for employee records."
+Output: {"task_type": "code_technical", "decision": "hybrid", "reason_code": "needs_external_knowledge"}
+
+Query: "My salary is $120k. Is that fair for a senior engineer in NYC?"
+Output: {"task_type": "information_request", "decision": "hybrid", "reason_code": "needs_external_knowledge"}
+
+Now classify:"""
+
+_VALID_TASK_TYPES = frozenset({
+    "domain_knowledge", "analysis_evaluation", "code_technical", "text_rewrite",
+    "structured_generation", "information_request", "simple_instruction",
+    "pii_dependent", "roleplay_persona", "crisis_sensitive", "other",
+})
+_VALID_DECISIONS = frozenset({"hybrid", "local_only"})
+_VALID_REASON_CODES = frozenset({
+    "needs_external_knowledge", "sufficient_local_context", "privacy_risk",
+})
+
+
+async def _classify_llm(query: str, ollama_client) -> Optional[Dict[str, str]]:
+    """
+    Call local LLM to classify task_type and propose decision.
+    Returns {"task_type", "decision", "reason_code"} or None on failure.
+
+    Security fields (injection_risk, exfiltration_risk, crisis_risk) are NOT
+    delegated to the LLM — they are always computed deterministically in classify().
+    """
+    import json as _json
+    import re as _re
+
+    messages = [
+        {"role": "system", "content": _LLM_CLASSIFY_PROMPT.strip()},
+        {"role": "user", "content": query},
+    ]
+    raw = await ollama_client.chat(messages, temperature=0.0)
+    if not raw:
+        return None
+    try:
+        clean = _re.sub(r"```(?:json)?", "", raw).strip().strip("`").strip()
+        start = clean.find("{")
+        end = clean.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise ValueError("no JSON object")
+        result = _json.loads(clean[start:end])
+        task_type   = result.get("task_type", "")
+        decision    = result.get("decision", "")
+        reason_code = result.get("reason_code", "")
+        if task_type not in _VALID_TASK_TYPES:
+            raise ValueError(f"unknown task_type: {task_type!r}")
+        if decision not in _VALID_DECISIONS:
+            raise ValueError(f"unknown decision: {decision!r}")
+        if reason_code not in _VALID_REASON_CODES:
+            reason_code = "needs_external_knowledge" if decision == "hybrid" else "sufficient_local_context"
+        return {"task_type": task_type, "decision": decision, "reason_code": reason_code}
+    except Exception as e:
+        print(f"[LLM Classify Error] {e} | raw={raw[:120]}")
+        return None
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def plan(
@@ -509,6 +601,103 @@ def plan(
         )
 
     reason_parts = [f"[Formal/{validated.reason_code}] {tags.task_type} → {validated.decision}"]
+    if validation_notes:
+        reason_parts.append("| " + "; ".join(validation_notes))
+
+    return FormalPlannerDecision(
+        route=route,
+        category=tags.task_type,
+        confidence=tags.task_confidence,
+        reason=" ".join(reason_parts),
+        sensitivity_score=tags.pii_sensitivity,
+        forced_local=forced_local,
+        decision=validated.decision,
+        reason_code=validated.reason_code,
+        proposed_external_task=validated.proposed_external_task,
+        classifier_tags=tags,
+        validation_passed=validation_passed,
+        validation_notes=validation_notes,
+    )
+
+
+async def plan_async(
+    query: str,
+    pii_types: List[str],
+    pii_detected: bool,
+    ollama_client,
+    sanitize_safe: bool = True,
+    sensitivity_threshold: int = DEFAULT_FORCE_LOCAL_THRESHOLD,
+) -> FormalPlannerDecision:
+    """
+    Hybrid planning pipeline: LLM classification + deterministic validation.
+
+    Layer 1a (LLM): classify task_type and propose decision (intelligent, context-aware)
+    Layer 1b (deterministic): compute security fields — injection_risk, exfiltration_risk,
+                               crisis_risk, nl_pii_detected, pii_sensitivity
+                               These are NEVER delegated to the LLM (attack surface).
+    Layer 2 (deterministic): validate — enforce invariants, monotonic downgrade only
+    Falls back to plan() if the LLM call fails.
+    """
+    # Layer 1b: deterministic security fields (always — regardless of LLM)
+    tags = classify(query, pii_types, pii_detected, sensitivity_threshold)
+
+    # Layer 1a: LLM classification (task_type + decision proposal)
+    llm_result = await _classify_llm(query, ollama_client)
+
+    if llm_result:
+        # Override task_type and initial decision with LLM output
+        task_type   = llm_result["task_type"]
+        decision    = llm_result["decision"]
+        reason_code = llm_result["reason_code"]
+        task_kind   = TASK_KIND_MAP.get(task_type, "other")
+
+        # Rebuild tags with LLM task_type (security fields stay deterministic)
+        tags.task_type       = task_type
+        tags.task_kind       = task_kind
+        tags.task_confidence = "high"  # LLM classification
+
+        # Build proposal from LLM decision
+        if decision == "hybrid":
+            proposal = PlannerProposal(
+                decision="hybrid",
+                reason_code=reason_code,
+                proposed_external_task={
+                    "kind": task_kind,
+                    "task_type": task_type,
+                    "constraints": ["no_pii", "no_hidden_context", "no_system_prompt"],
+                },
+            )
+        else:
+            proposal = PlannerProposal(
+                decision="local_only",
+                reason_code=reason_code,
+                proposed_external_task=None,
+            )
+
+        print(f"[Stage 1] LLM classifier → task={task_type}, decision={decision}")
+    else:
+        # LLM failed — fall back to deterministic propose()
+        print("[Stage 1] LLM classifier failed — falling back to deterministic")
+        proposal = propose(tags, sanitize_safe)
+
+    # Layer 2: deterministic validation (invariants enforced on deterministic security fields)
+    validated, validation_passed, validation_notes = validate(proposal, tags)
+
+    if validated.decision == "hybrid":
+        route = "external"
+        forced_local = False
+    else:
+        route = "local"
+        forced_local = (
+            tags.injection_risk == "high"
+            or tags.exfiltration_risk
+            or tags.crisis_risk
+            or (tags.pii_sensitivity >= sensitivity_threshold and bool(tags.pii_types))
+            or not sanitize_safe
+        )
+
+    prefix = "LLM" if llm_result else "Formal"
+    reason_parts = [f"[{prefix}/{validated.reason_code}] {tags.task_type} → {validated.decision}"]
     if validation_notes:
         reason_parts.append("| " + "; ".join(validation_notes))
 

@@ -96,16 +96,18 @@ class RelayOrchestrator:
         _, pii_found, _, binding_map = self.safety.scan_and_redact(user_query)
         pii_types = list({k.strip("[]").split("_")[0] for k in binding_map.keys()})
 
-        from source.relay.planner import plan as formal_plan
-        formal_decision = formal_plan(
+        from source.relay.planner import plan_async
+        formal_decision = await plan_async(
             query=user_query,
             pii_types=pii_types,
             pii_detected=pii_found,
+            ollama_client=self.ollama,
         )
         execution_path = "hybrid" if formal_decision.decision == "hybrid" else "local"
         print(
-            f"[Stage 1] Formal planner → {formal_decision.decision} "
+            f"[Stage 1] → {formal_decision.decision} "
             f"(reason={formal_decision.reason_code}, "
+            f"task={formal_decision.classifier_tags.task_type}, "
             f"pii={pii_types or 'none'}, "
             f"inj={formal_decision.classifier_tags.injection_risk})"
         )
