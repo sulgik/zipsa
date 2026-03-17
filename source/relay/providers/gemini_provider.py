@@ -18,9 +18,17 @@ class GeminiProvider(BaseLLMProvider):
         if not os.getenv("GEMINI_API_KEY"):
             print("[Gemini Error] GEMINI_API_KEY not set")
             return None
-        model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
         try:
-            response = self._client().models.generate_content(model=model, contents=prompt)
+            from google.genai import types as _types
+            thinking_budget = int(os.getenv("GEMINI_THINKING_BUDGET", "-1"))
+            config = _types.GenerateContentConfig(
+                thinking_config=_types.ThinkingConfig(thinking_budget=thinking_budget)
+            ) if thinking_budget != 0 else None
+            kwargs = dict(model=model, contents=prompt)
+            if config:
+                kwargs["config"] = config
+            response = self._client().models.generate_content(**kwargs)
             return response.text.strip() if response.text else None
         except Exception as e:
             print(f"[Gemini Error] {e}")
@@ -39,7 +47,7 @@ class GeminiProvider(BaseLLMProvider):
 
         def _call():
             api_key = os.getenv("GEMINI_API_KEY")
-            model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+            model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
             if not api_key:
                 print("[Gemini Error] GEMINI_API_KEY not set")
                 return None
@@ -60,9 +68,15 @@ class GeminiProvider(BaseLLMProvider):
                         contents.append(types.Content(role=gemini_role, parts=[types.Part(text=content)]))
 
                 client = genai.Client(api_key=api_key)
-                config = types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                ) if system_instruction else None
+                thinking_budget = int(os.getenv("GEMINI_THINKING_BUDGET", "-1"))
+                config_kwargs = {}
+                if system_instruction:
+                    config_kwargs["system_instruction"] = system_instruction
+                if thinking_budget != 0:
+                    config_kwargs["thinking_config"] = types.ThinkingConfig(
+                        thinking_budget=thinking_budget
+                    )
+                config = types.GenerateContentConfig(**config_kwargs) if config_kwargs else None
 
                 kwargs = dict(model=model, contents=contents)
                 if config:

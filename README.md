@@ -155,18 +155,18 @@ On each new turn, the local planning step sees the full **main thread** inside t
 
 ## Privacy & Utility
 
-Evaluated on 100 cases sampled from [benchmark_mimic_v1](06_qa/benchmark_dataset/generated/benchmark_mimic_v1.json) — a synthetic medical dataset covering appointment scheduling, prescription renewal, symptom assessment, treatment recommendation, and record access (20 cases each). External provider: Gemini. Local model: qwen3.5:9b.
+Evaluated on 100 real conversations from [WildChat](06_qa/benchmark_dataset/collected/episodes_sensitive100.jsonl) — sensitive queries spanning enterprise, legal, medical, technical, and financial domains. Local model: `qwen3.5:9b`. External model: `claude-sonnet-4-6`. Judge: `gemini-3-flash-preview` (thinking mode).
 
-**Privacy** — percentage of queries where no PII reached the external provider.
-**Utility** — LLM judge score (1–5) averaged across all cases.
+**Privacy** — re-identification risk score of the query reaching the external provider (0 = fully abstract, 100 = direct identifiers). Lower is better.
+**Utility** — LLM judge score (0–100) on helpfulness, accuracy, completeness, and clarity.
 
-| Condition | Privacy (no PII leak) | Utility (avg 1–5) |
-| --------- | :-------------------: | :---------------: |
-| Local-only | **100%** | 4.73 |
-| **Zipsa** | **100%** | **4.98** |
-| External-direct | 60% | 5.00 |
+| Condition | Avg risk score (↓) | Privacy preserved | Utility (↑) |
+| --------- | :----------------: | :---------------: | :---------: |
+| Local-only | **0** | **100%** | 73.3 |
+| **Zipsa** | **9.0** | **91%** | **77.9** |
+| External-direct | 26.2 | 72% | 79.4 |
 
-Zipsa matches the utility of sending queries directly to an external model while keeping PII leakage at 0%. Local-only achieves the same privacy but at lower utility — the gap is most pronounced on symptom assessment and treatment recommendation cases where external medical knowledge matters.
+Zipsa routes 36% of queries entirely locally (risk = 0) and semantically reformulates the remaining 64% before sending — reducing average re-identification risk from 26.2 to 9.0 while closing most of the utility gap versus sending queries directly.
 
 ## ✨ Key Features
 
@@ -202,12 +202,25 @@ Zipsa matches the utility of sending queries directly to an external model while
    cp .env.example .env
    ```
 
-   Edit `.env`:
+   Edit `.env` — pick one external provider:
 
    ```env
    LOCAL_MODEL=qwen3.5:9b
-   EXTERNAL_PROVIDER=anthropic
-   ANTHROPIC_API_KEY=your-key
+
+   # Option A — Google Gemini (recommended: cost-effective + reasoning)
+   EXTERNAL_PROVIDER=gemini
+   GEMINI_API_KEY=your-key
+   # GEMINI_MODEL=gemini-3-flash-preview   # default
+
+   # Option B — OpenAI
+   # EXTERNAL_PROVIDER=openai
+   # OPENAI_API_KEY=your-key
+   # OPENAI_MODEL=gpt-4o-mini             # default
+
+   # Option C — Anthropic
+   # EXTERNAL_PROVIDER=anthropic
+   # ANTHROPIC_API_KEY=your-key
+   # CLAUDE_MODEL=claude-sonnet-4-6       # default
    ```
 
    Ensure the local Ollama model exists before starting:
@@ -379,6 +392,10 @@ response = client.chat.completions.create(
 | `LOCAL_MODEL` | `qwen3.5:9b` | Ollama model for reformulation and synthesis |
 | `LOCAL_HOST` | `http://localhost:11434` | Ollama server URL |
 | `EXTERNAL_PROVIDER` | `anthropic` | External knowledge provider: `anthropic`, `gemini`, `openai` (`claude` is accepted as a legacy alias) |
+| `OPENAI_MODEL` | `gpt-4o-mini` | OpenAI model ID (when `EXTERNAL_PROVIDER=openai`) |
+| `CLAUDE_MODEL` | `claude-sonnet-4-6` | Claude model ID (when `EXTERNAL_PROVIDER=anthropic`) |
+| `GEMINI_MODEL` | `gemini-3-flash-preview` | Gemini model ID (when `EXTERNAL_PROVIDER=gemini`) |
+| `GEMINI_THINKING_BUDGET` | `-1` | Gemini thinking token budget; `-1` = dynamic (model decides), `0` = disabled |
 | `ANTHROPIC_API_KEY` | — | Required if `EXTERNAL_PROVIDER=anthropic` |
 | `GEMINI_API_KEY` | — | Required if `EXTERNAL_PROVIDER=gemini` |
 | `OPENAI_API_KEY` | — | Required if `EXTERNAL_PROVIDER=openai` |
