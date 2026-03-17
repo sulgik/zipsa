@@ -1,23 +1,17 @@
 """
-Large-scale privacy benchmark using benchmark_mimic_v1 (N=325)
+Benchmark: Local-only vs External-direct vs Zipsa  (N=100, English)
 
-Measures only Stage 1 (routing + reformulation) — no external LLM calls.
-
-Privacy metric : PII present in text sent to external provider (0/1 per query → %)
-  - local-only      : always 0 (nothing sent externally)
-  - external-direct : pii_in_text(prompt_en) for every case
-  - zipsa           : pii_in_text(reformulated_query) when hybrid, 0 when local
-
-Routing accuracy : expected label derived from utility_goal
-  - hybrid expected : "Medical Consultation / Treatment Recommendation", "Symptom Assessment"
-  - local expected  : "Appointment Scheduling", "Prescription Renewal", "Medical Record Access"
-
-Concurrency: BATCH_SIZE cases run in parallel to keep total runtime reasonable.
+Dataset   : benchmark_mimic_v1.json — 325 synthetic medical cases
+Sampling  : 20 cases per utility_goal category (stratified, seed=42)
+Pipeline  : full end-to-end (Stage 1 + 2 + 3) for all three conditions
+Metrics   :
+  privacy  — % of queries where no PII reached the external provider
+  utility  — LLM judge score (1–5) averaged across cases
 """
 
 import asyncio
 import json
-import os
+import random
 import sys
 
 sys.path.insert(0, ".")
@@ -29,65 +23,102 @@ BENCHMARK_PATH = (
     "06_qa/benchmark_dataset/generated/benchmark_mimic_v1.json"
 )
 
-BATCH_SIZE = 8  # concurrent cases per batch
+SAMPLE_PER_GOAL = 20   # 5 categories × 20 = 100
+BATCH_SIZE      = 5    # concurrent cases (external calls — keep moderate)
+RANDOM_SEED     = 42
 
-# utility_goal → expected route
-_HYBRID_GOALS = {
-    "Medical Consultation / Treatment Recommendation",
-    "Symptom Assessment",
-}
+JUDGE_PROMPT = """\
+You are an expert evaluator. Given an original question and an answer, \
+rate the answer on a scale from 1 to 5.
 
+ORIGINAL QUESTION:
+{question}
 
-def expected_route(utility_goal: str) -> str:
-    return "hybrid" if utility_goal in _HYBRID_GOALS else "local"
+ANSWER:
+{answer}
+
+Scoring rubric:
+5 — Fully correct, directly addresses the question, appropriately detailed
+4 — Mostly correct and helpful, minor gaps
+3 — Partially addresses the question, notable gaps or inaccuracies
+2 — Tangentially relevant but misses the core request
+1 — Incorrect, unhelpful, or refuses to answer when it should not
+
+Respond with ONLY a single integer (1–5). No explanation."""
 
 
 def pii_in_text(text: str, safety) -> bool:
-    _, pii_found, _, _ = safety.scan_and_redact(text)
-    return pii_found
+    _, found, _, _ = safety.scan_and_redact(text)
+    return found
 
 
-async def run_case(case: dict, safety, planner, ollama) -> dict:
-    from source.relay.planner import plan_async
+async def judge(question: str, answer: str, external_provider) -> int:
+    prompt = JUDGE_PROMPT.format(question=question, answer=answer)
+    try:
+        raw = await external_provider.generate_async(prompt)
+        if raw:
+            for tok in raw.strip().split():
+                if tok.isdigit() and 1 <= int(tok) <= 5:
+                    return int(tok)
+    except Exception as e:
+        print(f"  [Judge Error] {e}")
+    return 0
 
-    prompt = case["prompt_en"]
-    goal = case["utility_goal"]
-    exp_route = expected_route(goal)
 
-    _, pii_found, _, binding_map = safety.scan_and_redact(prompt)
-    pii_types = list({k.strip("[]").split("_")[0] for k in binding_map.keys()})
+async def run_local(query: str, ollama) -> str:
+    from source.relay.providers.local_provider import LocalProvider
+    lp = LocalProvider(ollama_client=ollama)
+    return await lp.generate_async_messages([{"role": "user", "content": query}]) or ""
 
-    # Stage 1a+b: formal planner (LLM classify + deterministic validate)
-    formal_decision = await plan_async(
-        query=prompt,
-        pii_types=pii_types,
-        pii_detected=pii_found,
-        ollama_client=ollama,
-    )
-    actual_route = "hybrid" if formal_decision.decision == "hybrid" else "local"
 
-    ext_query = None
-    pii_in_ext = False
+async def run_ext_direct(query: str, ext_provider) -> str:
+    try:
+        if hasattr(ext_provider, "generate_async_messages"):
+            return await ext_provider.generate_async_messages(
+                [{"role": "user", "content": query}]
+            ) or ""
+        return await ext_provider.generate_async(query) or ""
+    except Exception as e:
+        return f"(error: {e})"
 
-    if actual_route == "hybrid":
-        ext_query = await ollama.reformulate(text=prompt, conversation_context=None)
-        if ext_query:
-            pii_in_ext = pii_in_text(ext_query, safety)
-        else:
-            # reformulation failed → fallback to local
-            actual_route = "local"
-            pii_in_ext = False
+
+async def run_one(case: dict, safety, orchestrator, ext_provider, ollama) -> dict:
+    q = case["prompt_en"]
+    print(f"  [{case['id']}] {case['utility_goal'][:40]}")
+
+    # ── Three conditions ──────────────────────────────────────────────────────
+    zipsa_result  = await orchestrator.process_request(user_query=q)
+    zipsa_answer  = zipsa_result["final_answer"]
+    zipsa_ext_q   = zipsa_result["steps"].get("reformulated_query")
+
+    local_answer  = await run_local(q, ollama)
+    ext_answer    = await run_ext_direct(q, ext_provider)
+
+    # ── Privacy ───────────────────────────────────────────────────────────────
+    zipsa_pii_leaked   = pii_in_text(zipsa_ext_q, safety) if zipsa_ext_q else False
+    ext_direct_pii     = pii_in_text(q, safety)
+
+    # ── Utility (LLM judge) ───────────────────────────────────────────────────
+    local_score  = await judge(q, local_answer,  ext_provider)
+    zipsa_score  = await judge(q, zipsa_answer,  ext_provider)
+    ext_score    = await judge(q, ext_answer,    ext_provider)
+
+    route = "hybrid" if zipsa_result["provider"] != "local" else "local"
+    print(f"    route={route} | pii_leak={zipsa_pii_leaked} | "
+          f"scores: local={local_score} zipsa={zipsa_score} ext={ext_score}")
 
     return {
-        "id": case["id"],
-        "domain": case["domain"],
-        "utility_goal": goal,
-        "risk_type": case["risk_type"],
-        "expected_route": exp_route,
-        "actual_route": actual_route,
-        "prompt_pii": pii_found,         # external-direct would expose this
-        "zipsa_pii_leaked": pii_in_ext,  # zipsa: PII in outbound text?
-        "ext_query_snippet": (ext_query or "")[:120],
+        "id":                 case["id"],
+        "utility_goal":       case["utility_goal"],
+        "route":              route,
+        "zipsa_pii_leaked":   zipsa_pii_leaked,
+        "ext_direct_pii":     ext_direct_pii,
+        "local_utility":      local_score,
+        "zipsa_utility":      zipsa_score,
+        "ext_utility":        ext_score,
+        "zipsa_answer":       zipsa_answer[:200],
+        "local_answer":       local_answer[:200],
+        "ext_answer":         ext_answer[:200],
     }
 
 
@@ -95,87 +126,90 @@ async def main():
     from source.relay.safety import SafetyGuard
     from source.relay.config import get_settings
     from source.relay.ollama import OllamaClient
-    from source.relay import planner as planner_mod
+    from source.relay.orchestrator import RelayOrchestrator
+    from source.relay.providers.gemini_provider import GeminiProvider
 
+    # ── Load & stratified sample ──────────────────────────────────────────────
     with open(BENCHMARK_PATH, encoding="utf-8") as f:
         dataset = json.load(f)
 
-    print(f"Loaded {len(dataset)} cases from benchmark_mimic_v1.json")
+    from collections import defaultdict
+    by_goal: dict[str, list] = defaultdict(list)
+    for c in dataset:
+        by_goal[c["utility_goal"]].append(c)
 
-    config = get_settings()
-    safety = SafetyGuard()
-    ollama = OllamaClient(model=config.local_model, host=config.local_host)
+    rng = random.Random(RANDOM_SEED)
+    sample = []
+    for goal, cases in sorted(by_goal.items()):
+        n = min(SAMPLE_PER_GOAL, len(cases))
+        sample.extend(rng.sample(cases, n))
+    rng.shuffle(sample)
 
+    print(f"Sampled {len(sample)} cases from {len(by_goal)} goal categories")
+    from collections import Counter
+    for g, cnt in Counter(c["utility_goal"] for c in sample).most_common():
+        print(f"  {cnt:3d}  {g}")
+    print()
+
+    # ── Init ──────────────────────────────────────────────────────────────────
+    config       = get_settings()
+    safety       = SafetyGuard()
+    ollama       = OllamaClient(model=config.local_model, host=config.local_host)
+    ext_provider = GeminiProvider()
+    orchestrator = RelayOrchestrator(config=config)
+
+    # ── Run batches ───────────────────────────────────────────────────────────
     results = []
-    n = len(dataset)
-
-    for batch_start in range(0, n, BATCH_SIZE):
-        batch = dataset[batch_start : batch_start + BATCH_SIZE]
-        end_idx = min(batch_start + BATCH_SIZE, n)
-        print(f"  [{batch_start+1}–{end_idx}/{n}] running batch...")
-        tasks = [run_case(c, safety, planner_mod, ollama) for c in batch]
-        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-        for r in batch_results:
+    for i in range(0, len(sample), BATCH_SIZE):
+        batch = sample[i : i + BATCH_SIZE]
+        print(f"Batch {i//BATCH_SIZE + 1}/{-(-len(sample)//BATCH_SIZE)}")
+        tasks = [run_one(c, safety, orchestrator, ext_provider, ollama) for c in batch]
+        batch_out = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in batch_out:
             if isinstance(r, Exception):
                 print(f"  [Error] {r}")
             else:
                 results.append(r)
 
-    # ── Aggregate ──────────────────────────────────────────────────────────────
-    n_valid = len(results)
+    # ── Aggregate ─────────────────────────────────────────────────────────────
+    n = len(results)
 
-    # Routing accuracy (Zipsa vs expected)
-    routing_correct = sum(1 for r in results if r["actual_route"] == r["expected_route"])
+    local_privacy  = 1.0
+    ext_privacy    = 1 - sum(1 for r in results if r["ext_direct_pii"]) / n
+    zipsa_privacy  = 1 - sum(1 for r in results if r["zipsa_pii_leaked"]) / n
 
-    # Privacy rates
-    local_privacy   = 1.0   # local-only: never sends anything
-    ext_direct_pii  = sum(1 for r in results if r["prompt_pii"])
-    ext_privacy     = 1 - ext_direct_pii / n_valid
-    zipsa_pii       = sum(1 for r in results if r["zipsa_pii_leaked"])
-    zipsa_privacy   = 1 - zipsa_pii / n_valid
+    def avg(key):
+        scores = [r[key] for r in results if r[key] > 0]
+        return round(sum(scores) / len(scores), 2) if scores else 0.0
+
+    local_util = avg("local_utility")
+    zipsa_util = avg("zipsa_utility")
+    ext_util   = avg("ext_utility")
 
     print()
-    print("=" * 60)
-    print("LARGE-SCALE PRIVACY BENCHMARK  (Stage 1 only, N={})".format(n_valid))
-    print("=" * 60)
-    print(f"{'Condition':<22} {'Privacy (no PII leak)':>22}")
-    print("-" * 46)
-    print(f"{'local-only':<22} {local_privacy:>21.1%}")
-    print(f"{'zipsa':<22} {zipsa_privacy:>21.1%}")
-    print(f"{'external-direct':<22} {ext_privacy:>21.1%}")
-    print("-" * 46)
-    print(f"Routing accuracy: {routing_correct}/{n_valid} ({routing_correct/n_valid:.1%})")
-    print()
-
-    # Per-goal breakdown
-    from collections import defaultdict
-    by_goal: dict[str, list] = defaultdict(list)
-    for r in results:
-        by_goal[r["utility_goal"]].append(r)
-
-    print(f"{'Goal':<46} {'N':>4} {'Route OK':>8} {'PII leaked':>10}")
-    print("-" * 72)
-    for goal, rows in sorted(by_goal.items()):
-        ok = sum(1 for r in rows if r["actual_route"] == r["expected_route"])
-        leaked = sum(1 for r in rows if r["zipsa_pii_leaked"])
-        print(f"{goal:<46} {len(rows):>4} {ok:>8} {leaked:>10}")
+    print("=" * 64)
+    print(f"RESULTS  (N={n})")
+    print("=" * 64)
+    print(f"{'Condition':<26} {'Privacy (no PII leak)':>22} {'Utility (1–5)':>14}")
+    print("-" * 64)
+    print(f"{'local-only':<26} {local_privacy:>21.1%} {local_util:>14.2f}")
+    print(f"{'Zipsa':<26} {zipsa_privacy:>21.1%} {zipsa_util:>14.2f}")
+    print(f"{'external-direct':<26} {ext_privacy:>21.1%} {ext_util:>14.2f}")
+    print("=" * 64)
 
     # ── Save ──────────────────────────────────────────────────────────────────
     output = {
         "summary": {
-            "n": n_valid,
-            "routing_accuracy": round(routing_correct / n_valid, 3),
-            "local_only":      {"privacy_rate": local_privacy},
-            "zipsa":           {"privacy_rate": round(zipsa_privacy, 4), "pii_leaked_count": zipsa_pii},
-            "external_direct": {"privacy_rate": round(ext_privacy, 4), "pii_count": ext_direct_pii},
+            "n": n,
+            "local_only":      {"privacy_rate": local_privacy,         "utility_avg": local_util},
+            "zipsa":           {"privacy_rate": round(zipsa_privacy, 4), "utility_avg": zipsa_util},
+            "external_direct": {"privacy_rate": round(ext_privacy, 4),  "utility_avg": ext_util},
         },
         "cases": results,
     }
-
-    out_path = "benchmark_v2_results.json"
-    with open(out_path, "w", encoding="utf-8") as f:
+    with open("benchmark_v2_results.json", "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2, ensure_ascii=False)
-    print(f"\nSaved → {out_path}")
+    print("Saved → benchmark_v2_results.json")
 
 
 if __name__ == "__main__":

@@ -155,40 +155,20 @@ On each new turn, the local planning step sees the full **main thread** inside t
 
 ## Privacy & Utility
 
-Two complementary evaluations using Gemini as the external provider and qwen3.5:9b as the local model.
+Evaluated on 100 cases sampled from [benchmark_mimic_v1](06_qa/benchmark_dataset/generated/benchmark_mimic_v1.json) — a synthetic medical dataset covering appointment scheduling, prescription renewal, symptom assessment, treatment recommendation, and record access (20 cases each). External provider: Gemini. Local model: qwen3.5:9b.
 
 **Privacy** — percentage of queries where no PII reached the external provider.
-**Utility** — LLM judge score (1–5) assessing whether the answer correctly and helpfully addressed the original question.
-
-### Large-scale privacy evaluation (N=325)
-
-Evaluated on [benchmark_mimic_v1](06_qa/benchmark_dataset/generated/benchmark_mimic_v1.json), a 325-case synthetic medical dataset covering appointment scheduling, prescription renewal, symptom assessment, treatment recommendation, and record access across multiple PII risk types (name, phone, address, patient ID, SSN, DOB).
-
-Stage 1 only (routing + reformulation) — no external LLM call is made for this evaluation.
-
-| Condition | Privacy (no PII leak) | Routing accuracy |
-| --------- | --------------------- | ---------------- |
-| Local-only (no external) | **100%** | — |
-| **Zipsa** | **100%** | **98.5%** (320/325) |
-| External-direct (no privacy) | 63.1% | — |
-
-Zipsa achieved **0 PII leaks** across all 325 cases. External-direct exposed PII in 37% of queries (120/325) where identifiers (name, phone, address, ID, SSN) were detectable by the privacy scanner.
-
-### Utility evaluation (N=8)
-
-Full end-to-end evaluation across healthcare, legal, financial, code, identity-bound, and injection-attempt queries.
+**Utility** — LLM judge score (1–5) averaged across all cases.
 
 | Condition | Privacy (no PII leak) | Utility (avg 1–5) |
-| --------- | --------------------- | ----------------- |
-| Local-only (no external) | **100%** | 4.75 |
-| **Zipsa** | **100%** | **5.00** |
-| External-direct (no privacy) | 25% | 5.00 |
+| --------- | :-------------------: | :---------------: |
+| Local-only | **100%** | 4.73 |
+| **Zipsa** | **100%** | **4.98** |
+| External-direct | 60% | 5.00 |
 
-Zipsa matches the utility of sending queries directly to an external model while keeping PII leakage at 0%. Local-only achieves the same privacy but at lower utility, particularly on domain knowledge and financial analysis tasks where external expertise matters.
+Zipsa matches the utility of sending queries directly to an external model while keeping PII leakage at 0%. Local-only achieves the same privacy but at lower utility — the gap is most pronounced on symptom assessment and treatment recommendation cases where external medical knowledge matters.
 
-**Routing accuracy** (correct local/hybrid decision): **8/8** — including injection attempts that the LLM classifier misclassified as hybrid but the deterministic validator correctly blocked to local.
-
-> Benchmark scripts: [`run_benchmark.py`](run_benchmark.py) (N=8 full pipeline), [`run_benchmark_v2.py`](run_benchmark_v2.py) (N=325 Stage 1 privacy)
+> Benchmark script: [`run_benchmark_v2.py`](run_benchmark_v2.py)
 
 ## ✨ Key Features
 
