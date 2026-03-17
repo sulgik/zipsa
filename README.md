@@ -168,8 +168,6 @@ Evaluated on 100 cases sampled from [benchmark_mimic_v1](06_qa/benchmark_dataset
 
 Zipsa matches the utility of sending queries directly to an external model while keeping PII leakage at 0%. Local-only achieves the same privacy but at lower utility — the gap is most pronounced on symptom assessment and treatment recommendation cases where external medical knowledge matters.
 
-> Benchmark script: [`run_benchmark_v2.py`](run_benchmark_v2.py)
-
 ## ✨ Key Features
 
 - **Local LLM as privacy shield**: a local model always intermediates between your data and any external provider — raw queries never leave your environment.
