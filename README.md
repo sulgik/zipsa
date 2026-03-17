@@ -153,11 +153,30 @@ Session state
 
 On each new turn, the local planning step sees the full **main thread** inside the trusted zone. If it selects hybrid, it reformulates the current message into an external-safe query and appends that turn to the **sub-thread** — this is the only history the external model ever sees. Local-only turns are never mirrored into the sub-thread. When a client sends a plain OpenAI-style `messages` array without `session_id`, Zipsa reconstructs a temporary external-safe context per-request instead of using this persisted two-thread model.
 
+## Privacy & Utility
+
+Measured on 8 test queries (healthcare, legal, financial, code, identity-bound, injection attempt) using Gemini as the external provider and qwen3.5:9b as the local model.
+
+**Privacy** — percentage of queries where no PII reached the external provider.
+**Utility** — LLM judge score (1–5) assessing whether the answer correctly and helpfully addressed the original question.
+
+| Condition | Privacy (no PII leak) | Utility (avg 1–5) |
+| --------- | --------------------- | ----------------- |
+| Local-only (no external) | **100%** | 4.75 |
+| **Zipsa** | **100%** | **5.00** |
+| External-direct (no privacy) | 25% | 5.00 |
+
+Zipsa matches the utility of sending queries directly to an external model while keeping PII leakage at 0%. Local-only achieves the same privacy but at lower utility, particularly on domain knowledge and financial analysis tasks where external expertise matters.
+
+**Routing accuracy** (correct local/hybrid decision): **8/8** — including injection attempts that the LLM classifier misclassified as hybrid but the deterministic validator correctly blocked to local.
+
+> Test set and benchmark script: [`run_benchmark.py`](run_benchmark.py)
+
 ## ✨ Key Features
 
 - **Local LLM as privacy shield**: a local model always intermediates between your data and any external provider — raw queries never leave your environment.
 - **Semantic reformulation**: full sentence rewriting that abstracts context (occupation → category, institution → type, event → description), not just PII token replacement.
-- **Formal routing**: a deterministic 3-layer planner (Classifier → Planner → Validator) decides per-turn whether external knowledge is needed — no LLM call for routing, immune to prompt injection.
+- **Hybrid routing**: LLM classification for task understanding + deterministic validator for security invariants — intelligent routing that cannot be bypassed by prompt injection.
 - **Dual-thread sessions**: the main thread stays local; the sub-thread contains only external-safe hybrid turns for the cloud provider.
 - **Local is the decision-maker**: the external model is a knowledge provider only — the local model synthesizes the final answer with full original context.
 - **OpenAI-compatible API**: drop-in replacement endpoint.

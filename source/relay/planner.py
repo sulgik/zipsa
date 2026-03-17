@@ -555,6 +555,18 @@ async def _classify_llm(query: str, ollama_client) -> Optional[Dict[str, str]]:
         task_type   = result.get("task_type", "")
         decision    = result.get("decision", "")
         reason_code = result.get("reason_code", "")
+        # Normalize common LLM shorthand to valid task types
+        _TASK_ALIASES = {
+            "legal": "domain_knowledge",
+            "medical": "domain_knowledge",
+            "financial": "domain_knowledge",
+            "scientific": "domain_knowledge",
+            "technical": "code_technical",
+            "rewrite": "text_rewrite",
+            "generation": "structured_generation",
+            "instruction": "simple_instruction",
+        }
+        task_type = _TASK_ALIASES.get(task_type, task_type)
         if task_type not in _VALID_TASK_TYPES:
             raise ValueError(f"unknown task_type: {task_type!r}")
         if decision not in _VALID_DECISIONS:
