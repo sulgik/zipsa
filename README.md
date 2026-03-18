@@ -14,7 +14,7 @@
 You've got patient records, customer lists, contracts, salary info, SSNs, emails, API keys, incident reports, source code, pricing notes, board drafts, and internal strategy docs — stuff you *don't* want on someone else's cloud servers. But cloud AI is too useful to ignore.
 
 Zipsa solves this by:
-- **Local-first:** your personal data, internal business context, and security-sensitive details stay on your machine
+- **Local-first:** your personal data, internal business context, and security-sensitive details stay within your private zone (your device, your network, your on-prem infrastructure)
 - **Smart routing:** automatically decides what can stay local, what can be abstracted, and what actually needs cloud knowledge
 - **Semantic reformulation:** rewrites the entire question to abstract identity and proprietary context (name → profession, hospital → institution type, customer name → enterprise account, product codename → internal system) while preserving the knowledge context cloud needs to actually help
 - **Hybrid mode:** gets the best of both — local privacy + cloud knowledge
@@ -30,7 +30,7 @@ Drop it in front of any OpenAI-compatible client (like OpenClaw) and forget abou
 1. **Local scan** — Zipsa checks for PII, credentials, and other high-risk markers before anything happens
 2. **Classify** — Is this about *private identity, internal company context,* or *general knowledge*?
 3. **Route decision:**
-   - **Local-only?** → answered locally, done. No cloud call.
+   - **Private-only?** → handled entirely within your private zone, done. No cloud call.
    - **Hybrid?** → reformulate (rewrite entire query to remove identity, proprietary context, and secrets) → send to cloud → bring the answer back
 4. **Safety scan** — Did anything slip through? If yes, use local answer instead
 5. **Synthesize** — Apply cloud answer to *your* actual context (if hybrid)
@@ -39,7 +39,7 @@ Drop it in front of any OpenAI-compatible client (like OpenClaw) and forget abou
 - **Your query (local):** "Jane Smith (SSN 123-45-6789), senior ER physician. HbA1c 8.4% on metformin 2000mg + sitagliptin 100mg (eGFR 62). Treatment options?"
 - **What cloud sees:** "Healthcare professional, physician, late 30s. Diabetes, HbA1c 8.4%. Current drugs: metformin 2000mg + DPP-4i (100mg). eGFR 62. What escalation strategies?"
 - **Cloud answers with:** Generic escalation protocols (renal-safe options, likelihood of HbA1c reduction, monitoring needs)
-- **Local applies back to:** Jane's full profile — her hospital, her insurance, her prior decisions
+- **Private side applies back to:** Jane's full profile — her hospital, her insurance, her prior decisions
 - **You get:** Best clinical answer *without* Jane's SSN or identity ever touching cloud servers
 
 The same pattern works for internal contracts, support escalations, security incidents, customer strategy, source code, and other proprietary context.
@@ -57,7 +57,7 @@ The same pattern works for internal contracts, support escalations, security inc
   - Original: *"Jane Smith (DOB 1985, SSN 123-45-6789) is a senior ER physician with HbA1c 8.4% on metformin 2000mg + sitagliptin 100mg (eGFR 62)"*
   - Sent to cloud: *"Healthcare professional, late 30s, with diabetes. HbA1c 8.4%. Current: metformin 2000mg + DPP-4i (sitagliptin 100mg), eGFR 62. What escalation strategies exist?"*
 - Cloud: Returns generic escalation strategies (no idea it's Jane)
-- Local: Takes cloud answer, applies back to Jane's full profile
+- Private side: Takes cloud answer, applies back to Jane's full profile
 - Result: Best of both — cloud knowledge + Jane's actual context
 
 **Case 3: Internal business context (goes hybrid)**
@@ -66,7 +66,7 @@ The same pattern works for internal contracts, support escalations, security inc
   - Original: *"Acme renewal is blocked on a 17% discount floor, custom SLA language, and a churn warning from our sales team. Gross margin floor is 61%."*
   - Sent to cloud: *"An enterprise renewal is at risk over discount pressure, SLA demands, and churn signals. What negotiation options preserve margin while improving close probability?"*
 - Cloud: Returns generic negotiation playbooks
-- Local: Applies them back to the real account, margin floor, contract history, and approval chain
+- Private side: Applies them back to the real account, margin floor, contract history, and approval chain
 - Result: Better strategy without exposing the customer name or internal deal terms
 
 **Case 4: Pure knowledge (could go hybrid)**
@@ -84,7 +84,7 @@ Over several turns, you drop hints. Your name, your company, your customer, your
 But if you *strip* the history before each call, Claude loses track and gives worse answers.
 
 **Zipsa's solution:** Keep two separate conversation threads:
-1. **Full thread (local)** — everything, including all your personal, business, and operational context
+1. **Full thread (private zone)** — everything, including all your personal, business, and operational context
 2. **Cloud thread (safe)** — only the turns where you went hybrid
 
 They diverge when you ask local-only questions, re-converge on hybrid ones. Both stay in sync.
@@ -117,7 +117,7 @@ Ran it on 100 real conversations with sensitive workloads — medical, legal, fi
 - ✅ **Smart routing** — decides what's safe to send, what stays local, and what must be abstracted first
 - ✅ **Full sentence rewriting** — not just PII token-swapping, real reformulation of private and proprietary context
 - ✅ **Dual-thread sessions** — keeps local history private, cloud history safe
-- ✅ **Local has final say** — cloud is just a knowledge provider
+- ✅ **Private side has final say** — cloud is just a knowledge provider
 - ✅ **OpenAI-compatible API** — drop-in replacement for any LLM client
 - ✅ **Multi-provider** — works with Claude, Gemini, or OpenAI
 
@@ -273,7 +273,7 @@ Questions? Email: [sulgik@gmail.com](mailto:sulgik@gmail.com)
 ## FAQ
 
 **Q: Does Zipsa send my data to the cloud?**
-A: Only the minimal, reformulated version when absolutely necessary. Personal context stays local by design.
+A: Only the minimal, reformulated version when absolutely necessary. Personal context stays within your private zone by design.
 
 **Q: What if I don't trust even the reformulated query?**
 A: Set local-only mode and Zipsa will never touch the cloud.
