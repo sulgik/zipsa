@@ -127,7 +127,7 @@ Ran it on 100 real conversations with sensitive workloads — medical, legal, fi
 
 - Docker & Docker Compose
 - Ollama running locally (`localhost:11434`)
-- A local Ollama model (default: `llama3.1:8b`)
+- A local Ollama model (default: `qwen3.5:9b`)
 - API key for Claude, Gemini, or OpenAI
 
 ### Docker (Easy)
@@ -137,7 +137,7 @@ git clone https://github.com/sulgik/zipsa.git
 cd zipsa
 cp .env.example .env
 # Edit .env — pick your provider (claudeAPI key, etc)
-ollama pull llama3.1:8b
+ollama pull qwen3.5:9b
 docker-compose up -d
 curl http://localhost:8000/health
 ```
@@ -247,7 +247,7 @@ response = client.chat.completions.create(
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `LOCAL_MODEL` | `llama3.1:8b` | Ollama model |
+| `LOCAL_MODEL` | `qwen3.5:9b` | Ollama model |
 | `LOCAL_HOST` | `http://localhost:11434` | Ollama server |
 | `EXTERNAL_PROVIDER` | `anthropic` | Choose: `anthropic`, `gemini`, `openai` |
 | `OPENAI_MODEL` | `gpt-4o-mini` | If using OpenAI |

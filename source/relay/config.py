@@ -41,7 +41,7 @@ class Settings:
     log_dir: str = ""
 
     def __post_init__(self):
-        self.local_model = self.local_model or os.getenv("LOCAL_MODEL", "llama3.1:8b")
+        self.local_model = self.local_model or os.getenv("LOCAL_MODEL", "qwen3.5:9b")
         self.local_host = self.local_host or os.getenv("LOCAL_HOST", "http://localhost:11434")
         external_provider = self.external_provider or os.getenv("EXTERNAL_PROVIDER", "anthropic")
         if external_provider == "claude":

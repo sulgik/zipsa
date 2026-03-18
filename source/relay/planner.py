@@ -572,10 +572,9 @@ async def _classify_llm(query: str, ollama_client) -> Optional[Dict[str, str]]:
     import json as _json
     import re as _re
 
-    classify_query = _redact_for_classifier(query)
     messages = [
         {"role": "system", "content": _LLM_CLASSIFY_PROMPT.strip()},
-        {"role": "user", "content": classify_query},
+        {"role": "user", "content": _redact_for_classifier(query)},
     ]
     raw = await ollama_client.chat(messages, temperature=0.0)
     if not raw:
@@ -689,15 +688,9 @@ async def plan_async(
     tags = classify(query, pii_types, pii_detected, sensitivity_threshold)
 
     # Layer 1a: LLM classification (task_type + decision proposal)
-    # Skip if query contains raw credentials — avoids model safety refusals and
-    # correctly forces local route for credential-containing queries.
-    if _has_credentials(query):
-        print("[Stage 1] Credentials detected — skipping LLM classifier (forced local)")
-        llm_result = None
-        tags.task_type = "pii_dependent"
-        tags.task_confidence = "high"
-    else:
-        llm_result = await _classify_llm(query, ollama_client)
+    # If query contains raw credentials, pass a redacted version to the classifier
+    # to avoid model safety refusals — the classifier only needs task structure, not values.
+    llm_result = await _classify_llm(query, ollama_client)
 
     if llm_result:
         # Override task_type and initial decision with LLM output
