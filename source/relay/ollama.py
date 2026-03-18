@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 
 class OllamaClient:
     def __init__(self, model: str = None, host: str = None):
-        self.model = model or os.getenv("LOCAL_MODEL", "qwen3.5:9b")
+        self.model = model or os.getenv("LOCAL_MODEL", "llama3.1:8b")
         self.host = host or os.getenv("LOCAL_HOST", "http://localhost:11434")
 
     async def chat(self, messages: List[Dict[str, str]], temperature: float = 0.5) -> str:

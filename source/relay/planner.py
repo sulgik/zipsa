@@ -527,6 +527,40 @@ _VALID_REASON_CODES = frozenset({
 })
 
 
+_CREDENTIAL_PATTERNS: List[re.Pattern] = [
+    re.compile(r'(password|secret[\s_]?key|access[\s_]?key|api[\s_]?key|auth[\s_]?key|private[\s_]?key|client[\s_]?secret)\s*[:=]\s*\S+', re.IGNORECASE),
+    re.compile(r'\b(sk-[A-Za-z0-9\-_]{8,}|AKIA[A-Z0-9]{10,}|vs_tok_\S+)\b'),
+]
+
+
+def _has_credentials(query: str) -> bool:
+    """Return True if query contains raw credential values."""
+    return any(p.search(query) for p in _CREDENTIAL_PATTERNS)
+
+
+def _redact_for_classifier(query: str) -> str:
+    """
+    Redact credential values before passing to LLM classifier.
+    Keeps structural labels (e.g. "Password:") so the classifier understands
+    the query type, but removes actual values that trigger model safety refusals.
+    """
+    # Label: value patterns (keep label, redact value)
+    label_value = re.compile(
+        r'((?:password|secret[\s_]?key|access[\s_]?key|api[\s_]?key|token|auth[\s_]?key'
+        r'|private[\s_]?key|client[\s_]?secret|passphrase|credential)\s*[:=]\s*)\S+',
+        re.IGNORECASE
+    )
+    query = label_value.sub(r'\1[REDACTED]', query)
+
+    # Standalone credential-like tokens (sk-..., AKIA..., vs_tok_..., long hex/base64)
+    standalone = re.compile(
+        r'\b(sk-[A-Za-z0-9\-_]{8,}|AKIA[A-Z0-9]{16,}|vs_tok_\S+|[A-Za-z0-9/+]{40,}=*)\b'
+    )
+    query = standalone.sub('[REDACTED]', query)
+
+    return query
+
+
 async def _classify_llm(query: str, ollama_client) -> Optional[Dict[str, str]]:
     """
     Call local LLM to classify task_type and propose decision.
@@ -538,9 +572,10 @@ async def _classify_llm(query: str, ollama_client) -> Optional[Dict[str, str]]:
     import json as _json
     import re as _re
 
+    classify_query = _redact_for_classifier(query)
     messages = [
         {"role": "system", "content": _LLM_CLASSIFY_PROMPT.strip()},
-        {"role": "user", "content": query},
+        {"role": "user", "content": classify_query},
     ]
     raw = await ollama_client.chat(messages, temperature=0.0)
     if not raw:
@@ -654,7 +689,15 @@ async def plan_async(
     tags = classify(query, pii_types, pii_detected, sensitivity_threshold)
 
     # Layer 1a: LLM classification (task_type + decision proposal)
-    llm_result = await _classify_llm(query, ollama_client)
+    # Skip if query contains raw credentials — avoids model safety refusals and
+    # correctly forces local route for credential-containing queries.
+    if _has_credentials(query):
+        print("[Stage 1] Credentials detected — skipping LLM classifier (forced local)")
+        llm_result = None
+        tags.task_type = "pii_dependent"
+        tags.task_confidence = "high"
+    else:
+        llm_result = await _classify_llm(query, ollama_client)
 
     if llm_result:
         # Override task_type and initial decision with LLM output
