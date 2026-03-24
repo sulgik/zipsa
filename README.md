@@ -243,6 +243,55 @@ response = client.chat.completions.create(
 )
 ```
 
+## Authentication
+
+Zipsa supports two ways to authenticate with cloud providers: **API keys** (simple) and **OAuth 2.0** (browser-based, no keys in `.env`).
+
+### Option 1: API Keys (Simple)
+
+Set the provider's API key in `.env` and you're done:
+
+```env
+ANTHROPIC_API_KEY=sk-ant-...
+# or
+GEMINI_API_KEY=AIza...
+```
+
+### Option 2: OAuth 2.0 (PKCE)
+
+Use browser-based OAuth to connect without storing API keys. Supports Anthropic (Claude) and Google (Gemini).
+
+**Setup:**
+
+1. Register an OAuth app with the provider and get a client ID/secret
+2. Set the OAuth env vars (see Configuration table below)
+3. Start Zipsa, then open the authorize URL in your browser:
+
+```bash
+# Claude
+open http://localhost:8000/auth/claude
+
+# Gemini
+open http://localhost:8000/auth/gemini
+```
+
+4. Complete the consent flow — Zipsa stores the token automatically
+
+**OAuth endpoints:**
+
+| Endpoint | Method | Description |
+| --- | --- | --- |
+| `/auth/claude` | GET | Redirect to Anthropic OAuth consent |
+| `/auth/claude/callback` | GET | Handle Anthropic OAuth callback |
+| `/auth/claude/status` | GET | Check Claude connection status |
+| `/auth/claude/revoke` | POST | Revoke stored Claude token |
+| `/auth/gemini` | GET | Redirect to Google OAuth consent |
+| `/auth/gemini/callback` | GET | Handle Google OAuth callback |
+| `/auth/gemini/status` | GET | Check Gemini connection status |
+| `/auth/gemini/revoke` | POST | Revoke stored Gemini token |
+
+Tokens are kept in memory by default. Set `TOKEN_ENCRYPTION_KEY` to persist them to an encrypted file (`.tokens.enc`).
+
 ## Configuration
 
 | Variable | Default | Notes |
@@ -253,9 +302,15 @@ response = client.chat.completions.create(
 | `OPENAI_MODEL` | `gpt-4o-mini` | If using OpenAI |
 | `CLAUDE_MODEL` | `claude-sonnet-4-6` | If using Anthropic |
 | `GEMINI_MODEL` | `gemini-3-flash-preview` | If using Gemini |
-| `ANTHROPIC_API_KEY` | — | Required for Anthropic |
-| `GEMINI_API_KEY` | — | Required for Gemini |
+| `ANTHROPIC_API_KEY` | — | Required for Anthropic (API key mode) |
+| `GEMINI_API_KEY` | — | Required for Gemini (API key mode) |
 | `OPENAI_API_KEY` | — | Required for OpenAI |
+| `ANTHROPIC_OAUTH_CLIENT_ID` | — | For Anthropic OAuth |
+| `ANTHROPIC_OAUTH_CLIENT_SECRET` | — | For Anthropic OAuth |
+| `GOOGLE_OAUTH_CLIENT_ID` | — | For Gemini OAuth |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | — | For Gemini OAuth |
+| `OAUTH_REDIRECT_BASE` | `http://localhost:8000` | Base URL for OAuth callbacks |
+| `TOKEN_ENCRYPTION_KEY` | — | Fernet key; enables encrypted token persistence |
 | `DEMO_MODE` | `true` | Skip auth checks when true |
 
 ## License
