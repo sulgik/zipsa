@@ -11,6 +11,7 @@ from typing import Optional
 from source.relay.orchestrator import RelayOrchestrator
 from source.relay.config import get_settings
 from source.adapters.openai_compat import router as openai_router
+from source.auth.router import router as auth_router
 
 settings = get_settings()
 
@@ -33,6 +34,7 @@ security = HTTPBearer(auto_error=False)
 
 app.state.orchestrator = orchestrator
 app.include_router(openai_router)
+app.include_router(auth_router)
 
 
 class RelayRequest(BaseModel):

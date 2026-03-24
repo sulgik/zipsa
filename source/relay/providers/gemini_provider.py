@@ -6,17 +6,34 @@ from .base import BaseLLMProvider
 class GeminiProvider(BaseLLMProvider):
     """
     Gemini API Provider via google-genai Python SDK.
-    Requires GEMINI_API_KEY in environment.
+    Auth: API key (GEMINI_API_KEY) or OAuth token via TokenStore.
     """
+
+    def __init__(self, token_store=None):
+        self.token_store = token_store
 
     def _client(self):
         from google import genai
+        # Prefer OAuth token over API key
+        if self.token_store:
+            token = self.token_store.get("gemini")
+            if token and not token.is_expired:
+                from google.oauth2.credentials import Credentials
+                creds = Credentials(token=token.access_token)
+                return genai.Client(credentials=creds)
         return genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+    def _has_credentials(self) -> bool:
+        if self.token_store:
+            token = self.token_store.get("gemini")
+            if token and not token.is_expired:
+                return True
+        return bool(os.getenv("GEMINI_API_KEY"))
 
     def generate(self, prompt: str) -> Optional[str]:
         """Sync call — used as fallback."""
-        if not os.getenv("GEMINI_API_KEY"):
-            print("[Gemini Error] GEMINI_API_KEY not set")
+        if not self._has_credentials():
+            print("[Gemini Error] No API key or OAuth token available")
             return None
         model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
         try:
@@ -45,11 +62,32 @@ class GeminiProvider(BaseLLMProvider):
         """
         import asyncio
 
+        # Auto-refresh expired OAuth token before entering thread
+        if self.token_store:
+            token = self.token_store.get("gemini")
+            if token and token.is_expired and token.refresh_token:
+                try:
+                    from source.auth.oauth_flows import GeminiOAuth
+                    from source.relay.config import get_settings
+                    s = get_settings()
+                    oauth = GeminiOAuth(
+                        s.google_oauth_client_id,
+                        s.google_oauth_client_secret,
+                        f"{s.oauth_redirect_base}/auth/gemini/callback",
+                    )
+                    refreshed = await oauth.refresh_token(token)
+                    self.token_store.set("gemini", refreshed)
+                except Exception as e:
+                    print(f"[Gemini] Token refresh failed: {e}")
+
+        # Capture client builder for use in thread
+        _build_client = self._client
+        _has_creds = self._has_credentials
+
         def _call():
-            api_key = os.getenv("GEMINI_API_KEY")
             model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
-            if not api_key:
-                print("[Gemini Error] GEMINI_API_KEY not set")
+            if not _has_creds():
+                print("[Gemini Error] No API key or OAuth token available")
                 return None
             try:
                 from google import genai
@@ -63,11 +101,10 @@ class GeminiProvider(BaseLLMProvider):
                     if role == "system":
                         system_instruction = content
                     else:
-                        # Gemini uses "model" instead of "assistant"
                         gemini_role = "model" if role == "assistant" else "user"
                         contents.append(types.Content(role=gemini_role, parts=[types.Part(text=content)]))
 
-                client = genai.Client(api_key=api_key)
+                client = _build_client()
                 thinking_budget = int(os.getenv("GEMINI_THINKING_BUDGET", "-1"))
                 config_kwargs = {}
                 if system_instruction:

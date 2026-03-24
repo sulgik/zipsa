@@ -36,6 +36,13 @@ class Settings:
     claude_model: str = ""
     gemini_model: str = ""
 
+    # OAuth (optional — enables browser-based auth)
+    anthropic_oauth_client_id: str = ""
+    anthropic_oauth_client_secret: str = ""
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    oauth_redirect_base: str = ""  # e.g. "http://localhost:8000"
+
     # Server
     demo_mode: bool = False
     log_dir: str = ""
@@ -52,6 +59,13 @@ class Settings:
         self.log_dir = self.log_dir or os.getenv("LOG_DIR", "logs")
         if not self.demo_mode:
             self.demo_mode = os.getenv("DEMO_MODE", "true").lower() in ("true", "1", "yes")
+
+        # OAuth
+        self.anthropic_oauth_client_id = self.anthropic_oauth_client_id or os.getenv("ANTHROPIC_OAUTH_CLIENT_ID", "")
+        self.anthropic_oauth_client_secret = self.anthropic_oauth_client_secret or os.getenv("ANTHROPIC_OAUTH_CLIENT_SECRET", "")
+        self.google_oauth_client_id = self.google_oauth_client_id or os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
+        self.google_oauth_client_secret = self.google_oauth_client_secret or os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
+        self.oauth_redirect_base = self.oauth_redirect_base or os.getenv("OAUTH_REDIRECT_BASE", "http://localhost:8000")
 
 
 # Singleton

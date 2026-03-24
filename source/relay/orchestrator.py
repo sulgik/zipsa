@@ -54,7 +54,13 @@ class RelayOrchestrator:
                 f"Unknown external provider: {self.config.external_provider!r}. "
                 f"Must be one of: {list(PROVIDERS)}"
             )
-        self.external_provider = provider_cls()
+        import inspect
+        from source.auth.token_store import get_token_store
+        sig = inspect.signature(provider_cls.__init__)
+        if "token_store" in sig.parameters:
+            self.external_provider = provider_cls(token_store=get_token_store())
+        else:
+            self.external_provider = provider_cls()
 
     async def process_request(
         self,
