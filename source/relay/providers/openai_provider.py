@@ -12,7 +12,11 @@ class OpenAIProvider(BaseLLMProvider):
 
     def _client(self):
         from openai import OpenAI
-        return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        kwargs = {"api_key": os.getenv("OPENAI_API_KEY", "not-needed")}
+        base_url = os.getenv("OPENAI_BASE_URL")
+        if base_url:
+            kwargs["base_url"] = base_url
+        return OpenAI(**kwargs)
 
     def _model(self) -> str:
         return os.getenv("OPENAI_MODEL", "gpt-4o-mini")
@@ -43,7 +47,7 @@ class OpenAIProvider(BaseLLMProvider):
                 return None
             try:
                 from openai import OpenAI
-                client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+                client = self._client()
                 oai_messages = []
                 for m in messages:
                     role = m.get("role", "user")
