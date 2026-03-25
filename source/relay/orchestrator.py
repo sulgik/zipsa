@@ -72,6 +72,11 @@ class RelayOrchestrator:
         trace_id = str(uuid.uuid4())
         start_time = time.time()
         timings = {}
+        trace: list[str] = []
+
+        # Trace: Query received
+        query_preview = user_query[:50] + "..." if len(user_query) > 50 else user_query
+        trace.append(f"Query received: {query_preview}")
 
         # ── Load session state ────────────────────────────────────────────────
         # main_thread: full PII-intact local conversation
@@ -102,6 +107,12 @@ class RelayOrchestrator:
         _, pii_found, _, binding_map = self.safety.scan_and_redact(user_query)
         pii_types = list({k.strip("[]").split("_")[0] for k in binding_map.keys()})
 
+        # Trace: PII scan result
+        if pii_found:
+            trace.append(f"PII scan: detected {len(binding_map)} items ({', '.join(pii_types)})")
+        else:
+            trace.append("PII scan: clean")
+
         from source.relay.planner import plan_async
         formal_decision = await plan_async(
             query=user_query,
@@ -118,6 +129,9 @@ class RelayOrchestrator:
             f"inj={formal_decision.classifier_tags.injection_risk})"
         )
 
+        # Trace: Router decision
+        trace.append(f"Router decision: {execution_path}")
+
         external_query = None
         if execution_path == "hybrid":
             external_query = await self.ollama.reformulate(
@@ -126,11 +140,16 @@ class RelayOrchestrator:
             )
             if not external_query:
                 execution_path = "local"
+                trace.append("Router decision: local")  # Update trace after fallback
                 print("[Stage 1] Reformulation failed | Falling back to local-only")
             else:
+                # Trace: Reformulated query
+                reformulated_preview = external_query[:80] + "..." if len(external_query) > 80 else external_query
+                trace.append(f"Reformulated: {reformulated_preview}")
                 _, leaked_pii, _, leaked_binding = self.safety.scan_and_redact(external_query)
                 if leaked_pii:
                     execution_path = "local"
+                    trace.append("Router decision: local")  # Update trace after PII leak fallback
                     print(f"[Stage 1] Reformulation leaked PII {list(leaked_binding.keys())[:3]} | Falling back to local-only")
                     external_query = None
                 else:
@@ -184,6 +203,11 @@ class RelayOrchestrator:
 
             total_latency = (time.time() - start_time) * 1000
             log_event(trace_id, "complete", latency_ms=total_latency)
+
+            # Trace: Provider and completion
+            trace.append("Provider: local")
+            trace.append(f"Completed in {int(total_latency)}ms")
+
             return {
                 "final_answer": final_answer,
                 "steps": {"reformulated_query": None, "local_answer": final_answer, "external_answer": None},
@@ -193,6 +217,7 @@ class RelayOrchestrator:
                 "trace_id": trace_id,
                 "pii_detected": pii_found,
                 "pii_types": pii_types,
+                "trace": trace,
             }
 
         # ── Stage 2: Hybrid — external inference ─────────────────────────────
@@ -233,6 +258,14 @@ class RelayOrchestrator:
 
         total_latency = (time.time() - start_time) * 1000
         log_event(trace_id, "complete", latency_ms=total_latency)
+
+        # Trace: Provider and completion
+        if blocked:
+            trace.append("Provider: local")
+        else:
+            trace.append("Provider: external")
+        trace.append(f"Completed in {int(total_latency)}ms")
+
         return {
             "final_answer": final_answer,
             "steps": {
@@ -246,4 +279,5 @@ class RelayOrchestrator:
             "trace_id": trace_id,
             "pii_detected": pii_found,
             "pii_types": pii_types,
+            "trace": trace,
         }

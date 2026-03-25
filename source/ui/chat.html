@@ -104,6 +104,40 @@
         .meta-details .icon {
             flex-shrink: 0;
         }
+        .trace-details {
+            margin-top: 0.5rem;
+            font-size: 0.75rem;
+            color: #888;
+        }
+        .trace-details summary {
+            cursor: pointer;
+            outline: none;
+            list-style: none;
+            color: #666;
+            user-select: none;
+        }
+        .trace-details summary::-webkit-details-marker {
+            display: none;
+        }
+        .trace-details summary:hover {
+            color: #888;
+        }
+        .trace-details[open] summary {
+            margin-bottom: 0.5rem;
+        }
+        .trace-details .trace-list {
+            background: #16162a;
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
+            list-style: none;
+        }
+        .trace-details .trace-list li {
+            padding: 0.25rem 0;
+            border-bottom: 1px solid #2a2a4e;
+        }
+        .trace-details .trace-list li:last-child {
+            border-bottom: none;
+        }
         .input-area {
             padding: 1rem;
             border-top: 1px solid #2a2a4e;
@@ -272,6 +306,26 @@
 
                 details.appendChild(detailContent);
                 messageDiv.appendChild(details);
+
+                // "How it worked" trace section
+                if (metadata.trace && metadata.trace.length > 0) {
+                    const traceDetails = document.createElement('details');
+                    traceDetails.className = 'trace-details';
+
+                    const traceSummary = document.createElement('summary');
+                    traceSummary.textContent = 'How it worked';
+                    traceDetails.appendChild(traceSummary);
+
+                    const traceList = document.createElement('ul');
+                    traceList.className = 'trace-list';
+                    metadata.trace.forEach(step => {
+                        const li = document.createElement('li');
+                        li.textContent = step;
+                        traceList.appendChild(li);
+                    });
+                    traceDetails.appendChild(traceList);
+                    messageDiv.appendChild(traceDetails);
+                }
             }
 
             chatContainer.appendChild(messageDiv);
@@ -332,7 +386,8 @@
                     pii_detected: data.pii_detected,
                     pii_types: data.pii_types,
                     reformulated_query: data.steps?.reformulated_query,
-                    latency_ms: data.latency_ms
+                    latency_ms: data.latency_ms,
+                    trace: data.trace
                 };
                 addMessage('assistant', data.final_answer, metadata);
             } catch (err) {

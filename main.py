@@ -52,6 +52,7 @@ class RelayResponse(BaseModel):
     trace_id: str
     pii_detected: bool = False
     pii_types: list = []
+    trace: list[str] = []
 
 
 @app.post("/relay", response_model=RelayResponse)
