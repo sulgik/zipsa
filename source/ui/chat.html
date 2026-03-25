@@ -1,411 +1,397 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zipsa Chat</title>
-    <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-        body {
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #1a1a2e;
-            color: #e8e8e8;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        .header {
-            padding: 1rem;
-            border-bottom: 1px solid #2a2a4e;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        .header h1 {
-            font-size: 1.25rem;
-            font-weight: 600;
-        }
-        .header .badge {
-            font-size: 0.7rem;
-            background: #4a4a8e;
-            padding: 0.2rem 0.5rem;
-            border-radius: 4px;
-        }
-        .chat-container {
-            flex: 1;
-            overflow-y: auto;
-            padding: 1rem;
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-        }
-        .message {
-            max-width: 85%;
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-        }
-        .message.user {
-            align-self: flex-end;
-        }
-        .message.assistant {
-            align-self: flex-start;
-        }
-        .bubble {
-            padding: 0.75rem 1rem;
-            border-radius: 12px;
-            line-height: 1.5;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
-        .message.user .bubble {
-            background: #4a4a8e;
-            border-bottom-right-radius: 4px;
-        }
-        .message.assistant .bubble {
-            background: #2a2a4e;
-            border-bottom-left-radius: 4px;
-        }
-        .meta {
-            font-size: 0.75rem;
-            color: #888;
-            padding: 0 0.5rem;
-        }
-        .meta-details {
-            margin-top: 0.5rem;
-            font-size: 0.75rem;
-            color: #666;
-            background: #16162a;
-            padding: 0.5rem 0.75rem;
-            border-radius: 8px;
-            cursor: pointer;
-            user-select: none;
-        }
-        .meta-details summary {
-            outline: none;
-            list-style: none;
-        }
-        .meta-details summary::-webkit-details-marker {
-            display: none;
-        }
-        .meta-details[open] summary {
-            margin-bottom: 0.5rem;
-        }
-        .meta-details .detail-row {
-            padding: 0.25rem 0;
-            display: flex;
-            gap: 0.5rem;
-            align-items: flex-start;
-        }
-        .meta-details .icon {
-            flex-shrink: 0;
-        }
-        .trace-details {
-            margin-top: 0.5rem;
-            font-size: 0.75rem;
-            color: #888;
-        }
-        .trace-details summary {
-            cursor: pointer;
-            outline: none;
-            list-style: none;
-            color: #666;
-            user-select: none;
-        }
-        .trace-details summary::-webkit-details-marker {
-            display: none;
-        }
-        .trace-details summary:hover {
-            color: #888;
-        }
-        .trace-details[open] summary {
-            margin-bottom: 0.5rem;
-        }
-        .trace-details .trace-list {
-            background: #16162a;
-            padding: 0.5rem 0.75rem;
-            border-radius: 8px;
-            list-style: none;
-        }
-        .trace-details .trace-list li {
-            padding: 0.25rem 0;
-            border-bottom: 1px solid #2a2a4e;
-        }
-        .trace-details .trace-list li:last-child {
-            border-bottom: none;
-        }
-        .input-area {
-            padding: 1rem;
-            border-top: 1px solid #2a2a4e;
-            display: flex;
-            gap: 0.5rem;
-        }
-        .input-area input {
-            flex: 1;
-            padding: 0.75rem 1rem;
-            border: 1px solid #3a3a5e;
-            border-radius: 8px;
-            background: #16162a;
-            color: #e8e8e8;
-            font-size: 1rem;
-            outline: none;
-        }
-        .input-area input:focus {
-            border-color: #5a5aae;
-        }
-        .input-area input::placeholder {
-            color: #666;
-        }
-        .input-area button {
-            padding: 0.75rem 1.5rem;
-            border: none;
-            border-radius: 8px;
-            background: #5a5aae;
-            color: white;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .input-area button:hover:not(:disabled) {
-            background: #6a6abe;
-        }
-        .input-area button:disabled {
-            background: #3a3a5e;
-            cursor: not-allowed;
-        }
-        .loading {
-            display: flex;
-            gap: 0.3rem;
-            padding: 0.5rem;
-        }
-        .loading span {
-            width: 8px;
-            height: 8px;
-            background: #5a5aae;
-            border-radius: 50%;
-            animation: bounce 1.4s infinite ease-in-out;
-        }
-        .loading span:nth-child(1) { animation-delay: -0.32s; }
-        .loading span:nth-child(2) { animation-delay: -0.16s; }
-        @keyframes bounce {
-            0%, 80%, 100% { transform: scale(0); }
-            40% { transform: scale(1); }
-        }
-        .welcome {
-            text-align: center;
-            padding: 3rem 1rem;
-            color: #888;
-        }
-        .welcome h2 {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-            color: #aaa;
-        }
-        .welcome p {
-            font-size: 0.9rem;
-        }
-        @media (max-width: 600px) {
-            .message {
-                max-width: 95%;
-            }
-            .header h1 {
-                font-size: 1.1rem;
-            }
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zipsa — Privacy Gateway Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #0d1b2a;
+    --bg2:      #0e1e32;
+    --bg3:      #121e30;
+    --panel:    #08182c;
+    --border:   #1e3550;
+    --blue:     #1e90ff;
+    --green:    #28a745;
+    --orange:   #ff6b35;
+    --yellow:   #ffd700;
+    --lgray:    #9aacbd;
+    --white:    #e8f0f8;
+    --pii-bg:   #1a2a3a;
+    --pii-col:  #6a9abf;
+    --user-bg:  #0f2d4a;
+    --ai-bg:    #0e1e32;
+  }
+  body { background: var(--bg); color: var(--white); font-family: 'Segoe UI', system-ui, sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* HEADER */
+  header { background: #050e1a; border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .logo { display: flex; align-items: center; gap: 10px; }
+  .logo-badge { background: var(--blue); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 3px; letter-spacing: 1px; }
+  .logo-text { font-size: 15px; font-weight: 600; color: var(--white); }
+  .logo-sub  { font-size: 11px; color: var(--lgray); margin-top: 1px; }
+  .header-right { font-size: 11px; color: var(--lgray); text-align: right; line-height: 1.6; }
+
+  /* MAIN */
+  main { display: flex; flex: 1; overflow: hidden; }
+
+  /* CHAT PANEL */
+  #chat-panel { width: 60%; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+  #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  #messages::-webkit-scrollbar { width: 4px; }
+  #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .msg { display: flex; flex-direction: column; max-width: 85%; }
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.ai   { align-self: flex-start; align-items: flex-start; }
+  .msg-label { font-size: 10px; color: var(--lgray); margin-bottom: 3px; letter-spacing: 0.5px; }
+  .bubble { padding: 10px 14px; border-radius: 10px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .msg.user .bubble { background: var(--user-bg); border: 1px solid #1a3d5e; color: var(--white); border-bottom-right-radius: 3px; }
+  .msg.ai   .bubble { background: var(--ai-bg);   border: 1px solid var(--border); color: var(--white); border-bottom-left-radius: 3px; }
+  .bubble strong { color: var(--blue); }
+  .bubble h2 { font-size: 13px; color: var(--blue); margin: 6px 0 3px; }
+
+  /* typing indicator */
+  .typing { display: flex; gap: 4px; align-items: center; padding: 12px 14px; }
+  .typing span { width: 6px; height: 6px; background: var(--lgray); border-radius: 50%; animation: bounce 1.2s infinite; }
+  .typing span:nth-child(2) { animation-delay: .2s; }
+  .typing span:nth-child(3) { animation-delay: .4s; }
+  @keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+
+  /* INPUT AREA */
+  #input-area { border-top: 1px solid var(--border); padding: 12px 16px; background: #090f18; flex-shrink: 0; }
+  .scenario-row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .scenario-btn { background: var(--bg2); border: 1px solid var(--border); color: var(--lgray); padding: 4px 12px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all .15s; }
+  .scenario-btn:hover { border-color: var(--blue); color: var(--blue); }
+  .input-row { display: flex; gap: 8px; }
+  #user-input { flex: 1; background: var(--bg2); border: 1px solid var(--border); color: var(--white); padding: 9px 12px; border-radius: 6px; font-size: 13px; resize: none; height: 68px; font-family: inherit; }
+  #user-input:focus { outline: none; border-color: var(--blue); }
+  #user-input::placeholder { color: var(--lgray); }
+  #send-btn { background: var(--blue); border: none; color: #fff; padding: 0 18px; border-radius: 6px; font-size: 18px; cursor: pointer; transition: background .15s; }
+  #send-btn:hover { background: #1070dd; }
+  #send-btn:disabled { background: var(--border); cursor: not-allowed; }
+
+  /* INSPECTOR PANEL */
+  #inspector { width: 40%; display: flex; flex-direction: column; overflow: hidden; }
+  .inspector-header { background: #050e1a; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 11px; font-weight: 700; color: var(--lgray); letter-spacing: 1px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; }
+  #privacy-badge { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 10px; }
+  .badge-green { background: #0a2e15; color: var(--green); border: 1px solid var(--green); }
+  .badge-warn  { background: #2e1a0a; color: var(--orange); border: 1px solid var(--orange); }
+  .badge-gray  { background: var(--bg2); color: var(--lgray); border: 1px solid var(--border); }
+
+  #steps { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  #steps::-webkit-scrollbar { width: 4px; }
+  #steps::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .step-card { background: var(--panel); border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+  .step-card.active { border-color: var(--blue); }
+  .step-card.done   { border-color: #1e3a28; }
+  .step-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; user-select: none; }
+  .step-icon { font-size: 14px; width: 22px; text-align: center; }
+  .step-title { font-size: 12px; font-weight: 600; flex: 1; }
+  .step-time  { font-size: 10px; color: var(--lgray); }
+  .step-chev  { font-size: 10px; color: var(--lgray); transition: transform .2s; }
+  .step-card.open .step-chev { transform: rotate(180deg); }
+  .step-body { display: none; padding: 8px 12px 10px; border-top: 1px solid var(--border); }
+  .step-card.open .step-body { display: block; }
+
+  .kv-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  .kv-table td { padding: 3px 0; vertical-align: top; font-size: 11px; }
+  .kv-table td:first-child { color: var(--lgray); width: 90px; padding-right: 8px; white-space: nowrap; }
+  .kv-table td:last-child { color: var(--white); word-break: break-all; }
+
+  .code-block { background: #05111e; border: 1px solid var(--border); border-radius: 4px; padding: 7px 10px; font-family: monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; margin-top: 6px; color: #a8d8ff; line-height: 1.5; }
+
+  .tag-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 3px; }
+  .tag.pii         { background: #1a2a3a; color: #6a9abf; border: 1px solid #2a4060; }
+  .tag.route-ext   { background: #0a1e38; color: var(--blue); border: 1px solid var(--blue); }
+  .tag.route-local { background: #1a1a0a; color: var(--yellow); border: 1px solid var(--yellow); }
+  .tag.route-hybrid { background: #1a0a1a; color: #cc88ff; border: 1px solid #884499; }
+  .tag.safe        { background: #0a2e15; color: var(--green); border: 1px solid var(--green); }
+
+  #idle-hint { text-align: center; color: var(--lgray); font-size: 12px; padding: 40px 20px; line-height: 1.8; }
+  #idle-hint .arrow { font-size: 24px; display: block; margin-bottom: 8px; }
+
+  /* FOOTER */
+  footer { background: #050e1a; border-top: 1px solid var(--border); padding: 6px 20px; font-size: 10px; color: #5a7a9a; text-align: center; flex-shrink: 0; }
+</style>
 </head>
 <body>
-    <div class="header">
-        <h1>Zipsa</h1>
-        <span class="badge">Privacy Gateway</span>
+
+<header>
+  <div class="logo">
+    <div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span class="logo-badge">ZIPSA</span>
+        <span class="logo-text">Privacy Gateway</span>
+      </div>
+      <div class="logo-sub">Use powerful AI freely — your private data never leaves</div>
+    </div>
+  </div>
+  <div class="header-right">
+    Local LLM &nbsp;&#8596;&nbsp; Zipsa &nbsp;&#8596;&nbsp; Cloud AI<br>
+    <span style="color:#5a7a9a;">PII filtered before every cloud request</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- CHAT PANEL -->
+  <div id="chat-panel">
+    <div id="messages">
+      <div class="msg ai">
+        <div class="msg-label">ZIPSA ASSISTANT</div>
+        <div class="bubble">Hello! I'm an AI assistant protected by Zipsa Privacy Gateway.
+
+Ask me anything — even questions with sensitive personal or business data. Zipsa detects and removes PII before anything reaches the cloud, then applies the answer back to your actual situation.
+
+Try a quick scenario below, or type your own question.</div>
+      </div>
     </div>
 
-    <div class="chat-container" id="chatContainer">
-        <div class="welcome">
-            <h2>Welcome to Zipsa</h2>
-            <p>Your queries are processed locally first. Sensitive data stays private.</p>
-        </div>
+    <div id="input-area">
+      <div class="scenario-row">
+        <span style="font-size:11px;color:var(--lgray);align-self:center;">Quick scenarios:</span>
+        <button class="scenario-btn" onclick="loadScenario('medical')">&#127973; Medical</button>
+        <button class="scenario-btn" onclick="loadScenario('finance')">&#128200; Finance</button>
+        <button class="scenario-btn" onclick="loadScenario('code')">&#128187; Code</button>
+      </div>
+      <div class="input-row">
+        <textarea id="user-input" placeholder="Type your message… (Shift+Enter for new line)"></textarea>
+        <button id="send-btn" onclick="sendMessage()">&#8593;</button>
+      </div>
     </div>
+  </div>
 
-    <div class="input-area">
-        <input type="text" id="userInput" placeholder="Type your message..." autocomplete="off">
-        <button id="sendBtn">Send</button>
+  <!-- INSPECTOR PANEL -->
+  <div id="inspector">
+    <div class="inspector-header">
+      <span>&#128274; PRIVACY LOG</span>
+      <span id="privacy-badge" class="badge-gray">&#8212; &#8212;</span>
     </div>
+    <div id="steps">
+      <div id="idle-hint">
+        <span class="arrow">&#8601;</span>
+        Send a message to see<br>the privacy log in action.<br><br>
+        <span style="font-size:11px;">Every step shown in real time:<br>PII Scan &#8594; Route Decision &#8594; LLM &#8594; Response</span>
+      </div>
+    </div>
+  </div>
 
-    <script>
-        const sessionId = 'session_' + Math.random().toString(36).substring(2, 15);
-        const chatContainer = document.getElementById('chatContainer');
-        const userInput = document.getElementById('userInput');
-        const sendBtn = document.getElementById('sendBtn');
-        let isFirstMessage = true;
+</main>
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
+<footer>
+  &#9888;&#65039; Demo mode: queries are processed via OpenRouter. This is not a real trust zone — all traffic passes through the demo server. For real privacy, self-host Zipsa with your own Ollama.
+  &nbsp;&nbsp;|&nbsp;&nbsp; <a href="https://github.com/sulgik/zipsa" style="color:#4a7a9a;">github.com/sulgik/zipsa</a>
+</footer>
 
-        function addMessage(role, content, metadata = null) {
-            if (isFirstMessage) {
-                chatContainer.innerHTML = '';
-                isFirstMessage = false;
-            }
+<script>
+const SCENARIOS = {
+  medical: `Patient info: John D., DOB 1968-04-22, SSN 123-45-6789\nDiagnosis: Type 2 Diabetes, HbA1c 8.4%\nMeds: Metformin 500mg twice daily\n\nWhat are the drug interactions and monitoring guidelines?`,
+  finance: `Our Q3 revenue was $2.4M (down 8% YoY). Customer: Acme Corp, contract #AC-2041, ARR $180K.\n\nSuggest strategies to recover growth in Q4.`,
+  code:    `Write a Python function to sort a list of dictionaries by a given key, with an option for reverse order. Include type hints and a docstring.`
+};
 
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${role}`;
+let sessionId = 'session-' + Math.random().toString(36).slice(2, 10);
+let busy = false;
 
-            const bubble = document.createElement('div');
-            bubble.className = 'bubble';
-            bubble.textContent = content;
-            messageDiv.appendChild(bubble);
+function loadScenario(key) {
+  document.getElementById('user-input').value = SCENARIOS[key] || '';
+  document.getElementById('user-input').focus();
+}
 
-            if (role === 'assistant' && metadata) {
-                const details = document.createElement('details');
-                details.className = 'meta-details';
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
-                const summary = document.createElement('summary');
-                summary.textContent = 'Details';
-                details.appendChild(summary);
+function renderMarkdown(text) {
+  let h = escHtml(text);
+  h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  h = h.replace(/^### (.+)$/gm, '<h2>$1</h2>');
+  h = h.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  return h;
+}
 
-                const detailContent = document.createElement('div');
+function addMessage(role, html, isHtml=false) {
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  const label = role === 'user' ? 'YOU' : 'ZIPSA ASSISTANT';
+  div.innerHTML = `<div class="msg-label">${label}</div><div class="bubble">${isHtml ? html : escHtml(html)}</div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return div;
+}
 
-                // PII info
-                if (metadata.pii_detected && metadata.pii_types && metadata.pii_types.length > 0) {
-                    const piiRow = document.createElement('div');
-                    piiRow.className = 'detail-row';
-                    piiRow.innerHTML = `<span class="icon">🔒</span><span>PII detected: ${escapeHtml(metadata.pii_types.join(', '))} — removed before sending</span>`;
-                    detailContent.appendChild(piiRow);
-                }
+function addTyping() {
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'msg ai';
+  div.id = 'typing-indicator';
+  div.innerHTML = '<div class="msg-label">ZIPSA ASSISTANT</div><div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>';
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
 
-                // Provider info
-                const routeRow = document.createElement('div');
-                routeRow.className = 'detail-row';
-                const routeLabel = metadata.provider === 'local' ? 'local' : 'hybrid';
-                routeRow.innerHTML = `<span class="icon">🔀</span><span>Routed to: ${routeLabel}</span>`;
-                detailContent.appendChild(routeRow);
+function removeTyping() {
+  const t = document.getElementById('typing-indicator');
+  if (t) t.remove();
+}
 
-                // Reformulated query (if hybrid)
-                if (metadata.reformulated_query) {
-                    const queryRow = document.createElement('div');
-                    queryRow.className = 'detail-row';
-                    queryRow.innerHTML = `<span class="icon">✏️</span><span>Sent to cloud as: ${escapeHtml(metadata.reformulated_query)}</span>`;
-                    detailContent.appendChild(queryRow);
-                }
+function makeStepCard(icon, title, bodyHtml, state='done') {
+  const card = document.createElement('div');
+  card.className = `step-card ${state}`;
+  card.innerHTML = `
+    <div class="step-head" onclick="this.parentElement.classList.toggle('open')">
+      <span class="step-icon">${icon}</span>
+      <span class="step-title">${escHtml(title)}</span>
+      <span class="step-chev">&#9660;</span>
+    </div>
+    <div class="step-body">${bodyHtml}</div>`;
+  return card;
+}
 
-                // Latency
-                if (metadata.latency_ms) {
-                    const latencyRow = document.createElement('div');
-                    latencyRow.className = 'detail-row';
-                    latencyRow.innerHTML = `<span class="icon">⏱️</span><span>${Math.round(metadata.latency_ms)}ms</span>`;
-                    detailContent.appendChild(latencyRow);
-                }
+function clearSteps() {
+  const steps = document.getElementById('steps');
+  steps.innerHTML = '';
+}
 
-                details.appendChild(detailContent);
-                messageDiv.appendChild(details);
+function addStep(icon, title, bodyHtml, state='done') {
+  const steps = document.getElementById('steps');
+  const card = makeStepCard(icon, title, bodyHtml, state);
+  if (state === 'active') card.classList.add('open');
+  steps.appendChild(card);
+  steps.scrollTop = steps.scrollHeight;
+  return card;
+}
 
-                // "How it worked" trace section
-                if (metadata.trace && metadata.trace.length > 0) {
-                    const traceDetails = document.createElement('details');
-                    traceDetails.className = 'trace-details';
+function renderInspector(data) {
+  clearSteps();
+  const pii = data.pii_types || [];
+  const route = (data.provider || 'unknown').toLowerCase();
+  const latency = Math.round(data.latency_ms || 0);
+  const reformulated = data.reformulated_query || null;
+  const query = data._query || '';
 
-                    const traceSummary = document.createElement('summary');
-                    traceSummary.textContent = 'How it worked';
-                    traceDetails.appendChild(traceSummary);
+  // Badge
+  const badge = document.getElementById('privacy-badge');
+  if (pii.length > 0) {
+    badge.className = 'badge-warn';
+    badge.textContent = `${pii.length} PII field${pii.length>1?'s':''} caught`;
+  } else {
+    badge.className = 'badge-green';
+    badge.textContent = 'No PII detected';
+  }
 
-                    const traceList = document.createElement('ul');
-                    traceList.className = 'trace-list';
-                    metadata.trace.forEach(step => {
-                        const li = document.createElement('li');
-                        li.textContent = step;
-                        traceList.appendChild(li);
-                    });
-                    traceDetails.appendChild(traceList);
-                    messageDiv.appendChild(traceDetails);
-                }
-            }
+  // Step 1: Query received
+  addStep('&#128229;', 'Query received',
+    `<table class="kv-table"><tr><td>Content</td><td>${escHtml((query||'').slice(0,80))}${query.length>80?'…':''}</td></tr></table>`);
 
-            chatContainer.appendChild(messageDiv);
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-            return messageDiv;
-        }
+  // Step 2: PII scan
+  if (pii.length > 0) {
+    const tags = pii.map(t => `<span class="tag pii">${escHtml(t)}</span>`).join(' ');
+    addStep('&#128270;', `PII scan — ${pii.length} item${pii.length>1?'s':''} detected`,
+      `<div class="tag-row">${tags}</div><div style="font-size:11px;color:var(--lgray);margin-top:8px;">Sensitive fields removed before cloud request.</div>`);
+  } else {
+    addStep('&#128270;', 'PII scan — clean',
+      `<div class="tag-row"><span class="tag safe">NO PII</span></div>`);
+  }
 
-        function addLoading() {
-            if (isFirstMessage) {
-                chatContainer.innerHTML = '';
-                isFirstMessage = false;
-            }
-            const loadingDiv = document.createElement('div');
-            loadingDiv.className = 'message assistant';
-            loadingDiv.id = 'loading';
-            loadingDiv.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
-            chatContainer.appendChild(loadingDiv);
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-        }
+  // Step 3: Route decision
+  let routeTag, routeLabel;
+  if (route.includes('local') || route.includes('ollama')) {
+    routeTag = '<span class="tag route-local">LOCAL</span>';
+    routeLabel = 'Kept local (PII present or simple query)';
+  } else if (route.includes('hybrid')) {
+    routeTag = '<span class="tag route-hybrid">HYBRID</span>';
+    routeLabel = 'Local answer + cloud knowledge synthesis';
+  } else {
+    routeTag = '<span class="tag route-ext">EXTERNAL</span>';
+    routeLabel = pii.length > 0 ? 'Reformulated query sent to cloud (PII removed)' : 'No PII — routed directly to cloud';
+  }
+  addStep('&#8646;', 'Route decision',
+    `<div class="tag-row">${routeTag}</div><div style="font-size:11px;color:var(--lgray);margin-top:6px;">${routeLabel}</div>`);
 
-        function removeLoading() {
-            const loading = document.getElementById('loading');
-            if (loading) loading.remove();
-        }
+  // Step 4: Reformulated query (if PII was present and went external)
+  if (reformulated && pii.length > 0) {
+    addStep('&#9998;', 'Reformulated for cloud',
+      `<div class="code-block">${escHtml(reformulated.slice(0, 200))}${reformulated.length>200?'…':''}</div>`);
+  }
 
-        async function sendMessage() {
-            const query = userInput.value.trim();
-            if (!query) return;
+  // Step 5: Provider
+  addStep('&#9729;', `Provider: ${data.provider || 'unknown'}`,
+    `<table class="kv-table">
+      <tr><td>Model</td><td>${escHtml(data.provider || '—')}</td></tr>
+      <tr><td>Latency</td><td>${latency}ms total</td></tr>
+    </table>`);
 
-            userInput.value = '';
-            sendBtn.disabled = true;
-            userInput.disabled = true;
+  // Step 6: Done
+  addStep('&#9989;', `Completed in ${latency}ms`, '');
+}
 
-            addMessage('user', query);
-            addLoading();
+async function sendMessage() {
+  if (busy) return;
+  const input = document.getElementById('user-input');
+  const query = input.value.trim();
+  if (!query) return;
 
-            try {
-                const response = await fetch('/relay', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        user_query: query,
-                        session_id: sessionId
-                    })
-                });
+  busy = true;
+  document.getElementById('send-btn').disabled = true;
+  input.value = '';
 
-                removeLoading();
+  // Clear inspector, show loading
+  clearSteps();
+  document.getElementById('privacy-badge').className = 'badge-gray';
+  document.getElementById('privacy-badge').textContent = 'Processing…';
+  addStep('&#9203;', 'Sending to Zipsa…', '', 'active');
 
-                if (!response.ok) {
-                    const error = await response.json();
-                    addMessage('assistant', `Error: ${error.detail || 'Something went wrong'}`);
-                    return;
-                }
+  addMessage('user', query);
+  addTyping();
 
-                const data = await response.json();
-                const metadata = {
-                    provider: data.provider,
-                    pii_detected: data.pii_detected,
-                    pii_types: data.pii_types,
-                    reformulated_query: data.steps?.reformulated_query,
-                    latency_ms: data.latency_ms,
-                    trace: data.trace
-                };
-                addMessage('assistant', data.final_answer, metadata);
-            } catch (err) {
-                removeLoading();
-                addMessage('assistant', `Error: ${err.message}`);
-            } finally {
-                sendBtn.disabled = false;
-                userInput.disabled = false;
-                userInput.focus();
-            }
-        }
+  try {
+    const res = await fetch('/relay', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ user_query: query, session_id: sessionId })
+    });
 
-        sendBtn.addEventListener('click', sendMessage);
-        userInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendMessage();
-        });
+    removeTyping();
 
-        userInput.focus();
-    </script>
+    if (!res.ok) {
+      const err = await res.text();
+      addMessage('ai', `Error ${res.status}: ${err}`, false);
+      clearSteps();
+      document.getElementById('privacy-badge').className = 'badge-gray';
+      document.getElementById('privacy-badge').textContent = 'Error';
+      return;
+    }
+
+    const data = await res.json();
+    data._query = query;
+
+    const answer = data.final_answer || '(no response)';
+    addMessage('ai', renderMarkdown(answer), true);
+    renderInspector(data);
+
+  } catch(e) {
+    removeTyping();
+    addMessage('ai', 'Connection error: ' + e.message);
+    clearSteps();
+    document.getElementById('privacy-badge').className = 'badge-gray';
+    document.getElementById('privacy-badge').textContent = 'Error';
+  } finally {
+    busy = false;
+    document.getElementById('send-btn').disabled = false;
+    input.focus();
+  }
+}
+
+// Keyboard shortcut
+document.getElementById('user-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+</script>
 </body>
 </html>
