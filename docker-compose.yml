@@ -20,9 +20,10 @@ services:
     env_file:
       - .env
     environment:
-      - OLLAMA_HOST=http://ollama:11434
+      - LOCAL_HOST=http://ollama:11434   # points to the bundled Ollama service
     volumes:
       - ./logs:/app/logs
+      - ./data:/app/data
     depends_on:
       ollama:
         condition: service_healthy

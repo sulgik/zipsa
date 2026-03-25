@@ -152,6 +152,21 @@ curl http://localhost:8000/health
 docker-compose up -d
 ```
 
+### Option D: Cloud-hosted Zipsa (gateway only — no local Docker needed)
+
+Run Zipsa in the cloud. You supply both LLM endpoints via env.
+
+```bash
+# Deploy Zipsa only — no bundled Ollama
+docker-compose -f docker-compose.cloud.yml up -d
+
+# .env:
+# LOCAL_HOST=https://api.ollama.com   ← your LLM endpoint
+# LOCAL_API_KEY=your-ollama-key
+# ANTHROPIC_API_KEY=sk-...
+```
+```
+
 ### Or Local (Native Python)
 
 Two install modes:

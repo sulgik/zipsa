@@ -1,0 +1,20 @@
+# Cloud mode: Zipsa gateway only — no bundled Ollama.
+#
+# You supply the LLM endpoints via environment variables:
+#   LOCAL_HOST  → your Ollama (Cloud, on-prem, vLLM, LM Studio, …)
+#   EXTERNAL_*  → Claude / Gemini / OpenAI API key
+#
+# Usage:
+#   docker-compose -f docker-compose.cloud.yml up -d
+
+services:
+  zipsa:
+    build: .
+    container_name: zipsa
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
