@@ -325,10 +325,10 @@ async def route_with_llm(
         )
     except Exception as e:
         return RoutingDecision(
-            route="external",
+            route="local",
             category="unknown",
             confidence="medium",
-            reason=f"Classification error ({e}) — defaulting to external",
+            reason=f"Classification error ({e}) — fail-safe: defaulting to local",
             sensitivity_score=sensitivity_score,
         )
 
