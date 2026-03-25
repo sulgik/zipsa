@@ -40,11 +40,30 @@ cp .env.example .env
 Open `.env` and set your cloud provider API key. Pick ONE:
 
 ### Claude (Anthropic) — Recommended
+
+**Option A: API Key** (pay-per-use)
 ```env
-EXTERNAL_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-your-key-here
+EXTERNAL_PROVIDER=claude
+ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
 ```
 Get your key: [console.anthropic.com](https://console.anthropic.com/)
+
+**Option B: Claude Max Subscription** (no extra API charges)
+
+If you already have a Claude Max subscription, you can use a setup token instead of an API key — no additional billing.
+
+```bash
+# Generate a setup token (requires Claude Code CLI)
+claude setup-token
+# → outputs: sk-ant-oat01-...
+```
+
+```env
+EXTERNAL_PROVIDER=claude
+ANTHROPIC_API_KEY=sk-ant-oat01-your-setup-token-here
+```
+
+> **How it works:** Claude setup tokens are OAuth access tokens that Anthropic's API accepts in the same `Authorization: Bearer` header as regular API keys. Your Max subscription covers the usage — no extra cost.
 
 ### GPT (OpenAI)
 ```env
