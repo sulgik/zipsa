@@ -119,36 +119,73 @@ async def openai_chat_completions(
     raw: Request,
     creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ):
+    import asyncio as _asyncio
+
     body = await raw.json()
     user_query = _extract_latest_user_message(body.get("messages", []))
     if not user_query.strip():
         raise HTTPException(status_code=400, detail="No message content")
 
-    # session_id is an optional custom field for multi-turn context tracking
     session_id = body.get("session_id") or None
     messages_history = _extract_history(body.get("messages", []))
-
     orchestrator: RelayOrchestrator = raw.app.state.orchestrator
     api_key = creds.credentials if creds else None
-    result = await orchestrator.process_request(
-        user_query=user_query, api_key=api_key, session_id=session_id,
-        messages_history=messages_history,
-    )
+    model_id = body.get("model") or "zipsa"
 
-    final_answer = (result.get("final_answer") or "") + _make_footer(result)
+    async def _generate():
+        # Run orchestrator as a background task and send SSE keepalive comments
+        # while waiting, so reverse proxies with short timeouts don't cut the
+        # connection before a response arrives (e.g. Fly.io's 75-second limit).
+        task = _asyncio.create_task(
+            orchestrator.process_request(
+                user_query=user_query, api_key=api_key, session_id=session_id,
+                messages_history=messages_history,
+            )
+        )
+        while not task.done():
+            yield ": keepalive\n\n"
+            try:
+                await _asyncio.wait_for(_asyncio.shield(task), timeout=5.0)
+            except _asyncio.TimeoutError:
+                pass
 
-    _log.appendleft({
-        "time": time.strftime("%H:%M:%S"),
-        "query": user_query[:80],
-        "provider": result.get("provider", "?"),
-        "routing": result.get("routing", {}),
-        "sensitivity": result.get("steps", {}).get("sensitivity", "?"),
-        "latency_ms": result.get("latency_ms", 0),
-        "answer_len": len(final_answer),
-    })
-    print(f"[Zipsa] → {_log[0]['provider']} | PII={_log[0]['sensitivity']} | {_log[0]['answer_len']}chars")
+        result = task.result()
+        final_answer = (result.get("final_answer") or "") + _make_footer(result)
 
-    return _sse_stream(final_answer, body.get("model") or "zipsa")
+        _log.appendleft({
+            "time": time.strftime("%H:%M:%S"),
+            "query": user_query[:80],
+            "provider": result.get("provider", "?"),
+            "routing": result.get("routing", {}),
+            "sensitivity": result.get("steps", {}).get("sensitivity", "?"),
+            "latency_ms": result.get("latency_ms", 0),
+            "answer_len": len(final_answer),
+        })
+        print(f"[Zipsa] → {_log[0]['provider']} | PII={_log[0]['sensitivity']} | {_log[0]['answer_len']}chars")
+
+        cid = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        created = int(time.time())
+        for delta in [
+            {"role": "assistant", "content": ""},
+            {"content": final_answer},
+        ]:
+            chunk = {
+                "id": cid, "object": "chat.completion.chunk", "created": created,
+                "model": model_id,
+                "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+            }
+            yield f"data: {json.dumps(chunk)}\n\n"
+
+        chunk = {
+            "id": cid, "object": "chat.completion.chunk", "created": created,
+            "model": model_id,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": len(final_answer.split()), "total_tokens": 0},
+        }
+        yield f"data: {json.dumps(chunk)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(_generate(), media_type="text/event-stream")
 
 
 @router.get("/logs")

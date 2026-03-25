@@ -276,16 +276,29 @@ class RelayOrchestrator:
                     binding_lines.append(f"  {placeholder} → {real_value}")
             binding_table = "\n".join(binding_lines) if binding_lines else "  (no named entities — answer applies as-is)"
 
-            local_prompt = LOCAL_PROMPT.format(
-                original_query=user_query,
-                binding_table=binding_table,
-                external_answer=external_answer,
+            # Skip synthesis when the external answer contains no placeholders —
+            # calling the local LLM with nothing to substitute tends to produce
+            # "I need more context" responses instead of the actual answer.
+            import re as _re_ph
+            _placeholders_found = _re_ph.findall(
+                r'\[(?:NAME|PERSON|ORG|COMPANY|LOCATION|DATE|ROLE)_\d+\]',
+                external_answer,
             )
-            final_answer = await self.ollama.chat(
-                [{"role": "system", "content": local_prompt},
-                 {"role": "user", "content": "Write the final answer now."}],
-                temperature=0.35,
-            ) or external_answer
+            if not _placeholders_found:
+                final_answer = external_answer
+                timings["local_ms"] = 0.0
+                print("[Stage 3] No placeholders in external answer — skipping synthesis")
+            else:
+                local_prompt = LOCAL_PROMPT.format(
+                    original_query=user_query,
+                    binding_table=binding_table,
+                    external_answer=external_answer,
+                )
+                final_answer = await self.ollama.chat(
+                    [{"role": "system", "content": local_prompt},
+                     {"role": "user", "content": "Write the final answer now."}],
+                    temperature=0.35,
+                ) or external_answer
             timings["local_ms"] = (time.time() - t0) * 1000
             log_event(trace_id, "local_synthesis", raw_input=f"ext={external_answer[:100]}",
                       raw_output=final_answer, provider="local", latency_ms=timings["local_ms"])
