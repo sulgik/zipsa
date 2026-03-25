@@ -6,6 +6,7 @@ Usage:
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 from source.relay.orchestrator import RelayOrchestrator
@@ -49,6 +50,8 @@ class RelayResponse(BaseModel):
     timings: dict
     latency_ms: float
     trace_id: str
+    pii_detected: bool = False
+    pii_types: list = []
 
 
 @app.post("/relay", response_model=RelayResponse)
@@ -69,6 +72,11 @@ async def relay_endpoint(
         session_id=request.session_id,
     )
     return result
+
+
+@app.get("/")
+async def chat_ui():
+    return FileResponse("source/ui/chat.html")
 
 
 @app.get("/health")

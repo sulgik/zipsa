@@ -191,6 +191,8 @@ class RelayOrchestrator:
                 "timings": timings,
                 "latency_ms": total_latency,
                 "trace_id": trace_id,
+                "pii_detected": pii_found,
+                "pii_types": pii_types,
             }
 
         # ── Stage 2: Hybrid — external inference ─────────────────────────────
@@ -242,4 +244,6 @@ class RelayOrchestrator:
             "timings": timings,
             "latency_ms": total_latency,
             "trace_id": trace_id,
+            "pii_detected": pii_found,
+            "pii_types": pii_types,
         }
