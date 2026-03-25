@@ -19,8 +19,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -e ".[server,claude,gemini,openai,auth]"
           pip install pytest pytest-asyncio
+          pip install httpx pydantic anthropic google-genai google-auth openai cryptography fastapi uvicorn
 
       - name: Run tests
         run: pytest tests/ -v --tb=short

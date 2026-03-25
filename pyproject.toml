@@ -77,3 +77,7 @@ Repository = "https://github.com/sulgik/zipsa"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["source*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
