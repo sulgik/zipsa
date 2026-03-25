@@ -3,6 +3,7 @@
 Usage:
     uvicorn main:app --host 0.0.0.0 --port 8000
 """
+import os
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -86,6 +87,7 @@ async def health_check():
         "status": "ok",
         "local_model": settings.local_model,
         "external_provider": settings.external_provider,
+        "external_model": os.getenv("OPENAI_MODEL") or os.getenv("EXTERNAL_MODEL", ""),
         "demo_mode": settings.demo_mode,
     }
     try:

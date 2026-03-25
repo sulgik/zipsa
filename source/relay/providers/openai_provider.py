@@ -19,7 +19,7 @@ class OpenAIProvider(BaseLLMProvider):
         return OpenAI(**kwargs)
 
     def _model(self) -> str:
-        return os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        return os.getenv("OPENAI_MODEL") or os.getenv("EXTERNAL_MODEL", "gpt-4o-mini")
 
     def generate(self, prompt: str) -> Optional[str]:
         if not os.getenv("OPENAI_API_KEY"):

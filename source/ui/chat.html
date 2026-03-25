@@ -131,7 +131,9 @@
     </div>
   </div>
   <div class="header-right">
-    Local LLM &nbsp;&#8596;&nbsp; Zipsa &nbsp;&#8596;&nbsp; Cloud AI<br>
+    <span id="model-local" style="color:var(--yellow);">Local: …</span>
+    &nbsp;&#8596;&nbsp; Zipsa &nbsp;&#8596;&nbsp;
+    <span id="model-external" style="color:var(--blue);">External: …</span><br>
     <span style="color:#5a7a9a;">PII filtered before every cloud request</span>
   </div>
 </header>
@@ -261,7 +263,7 @@ function clearSteps() {
 function addStep(icon, title, bodyHtml, state='done') {
   const steps = document.getElementById('steps');
   const card = makeStepCard(icon, title, bodyHtml, state);
-  if (state === 'active') card.classList.add('open');
+  card.classList.add('open');  // always expanded by default
   steps.appendChild(card);
   steps.scrollTop = steps.scrollHeight;
   return card;
@@ -321,9 +323,12 @@ function renderInspector(data) {
   }
 
   // Step 5: Provider
-  addStep('&#9729;', `Provider: ${data.provider || 'unknown'}`,
+  const modelName = (route === 'local' || route === 'ollama')
+    ? (window._localModel || data.provider || 'local')
+    : (window._externalModel || data.provider || 'external');
+  addStep('&#9729;', `Provider: ${modelName}`,
     `<table class="kv-table">
-      <tr><td>Model</td><td>${escHtml(data.provider || '—')}</td></tr>
+      <tr><td>Model</td><td>${escHtml(modelName)}</td></tr>
       <tr><td>Latency</td><td>${latency}ms total</td></tr>
     </table>`);
 
@@ -387,6 +392,23 @@ async function sendMessage() {
     input.focus();
   }
 }
+
+// Load model info from health endpoint
+async function loadModelInfo() {
+  try {
+    const res = await fetch('/health');
+    const data = await res.json();
+    const local = data.local_model || '';
+    const external = data.external_model || data.external_provider || '';
+    window._localModel = local;
+    window._externalModel = external;
+    const shortLocal    = local.split('/').pop()    || local    || '…';
+    const shortExternal = external.split('/').pop() || external || '…';
+    document.getElementById('model-local').textContent    = 'Local: '    + shortLocal;
+    document.getElementById('model-external').textContent = 'External: ' + shortExternal;
+  } catch(e) { /* ignore */ }
+}
+loadModelInfo();
 
 // Keyboard shortcut
 document.getElementById('user-input').addEventListener('keydown', e => {
