@@ -274,7 +274,7 @@ function renderInspector(data) {
   const pii = data.pii_types || [];
   const route = (data.provider || 'unknown').toLowerCase();
   const latency = Math.round(data.latency_ms || 0);
-  const reformulated = data.reformulated_query || null;
+  const reformulated = (data.steps && data.steps.reformulated_query) || data.reformulated_query || null;
   const query = data._query || '';
 
   // Badge
@@ -316,10 +316,10 @@ function renderInspector(data) {
   addStep('&#8646;', 'Route decision',
     `<div class="tag-row">${routeTag}</div><div style="font-size:11px;color:var(--lgray);margin-top:6px;">${routeLabel}</div>`);
 
-  // Step 4: Reformulated query (if PII was present and went external)
-  if (reformulated && pii.length > 0) {
+  // Step 4: Reformulated query (shown whenever available)
+  if (reformulated) {
     addStep('&#9998;', 'Reformulated for cloud',
-      `<div class="code-block">${escHtml(reformulated.slice(0, 200))}${reformulated.length>200?'…':''}</div>`);
+      `<div class="code-block">${escHtml(reformulated)}</div>`);
   }
 
   // Step 5: Provider
