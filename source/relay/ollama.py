@@ -12,8 +12,12 @@ class OllamaClient:
         self.api_key = api_key or os.getenv("LOCAL_API_KEY", "")
 
     def _is_openai_compatible(self) -> bool:
-        """Detect if host is OpenAI-compatible (OpenRouter, vLLM, etc.) vs native Ollama."""
-        return not any(x in self.host for x in ["localhost", "127.0.0.1", "11434", "ollama.com/api"])
+        """Detect if host is OpenAI-compatible (OpenRouter, vLLM, etc.) vs native Ollama.
+        Ollama native: localhost, 127.0.0.1, host.docker.internal, any host with port 11434
+        OpenAI-compatible: openrouter.ai, custom cloud endpoints, etc.
+        """
+        ollama_indicators = ["localhost", "127.0.0.1", "11434", "ollama.com/api", "host.docker.internal"]
+        return not any(x in self.host for x in ollama_indicators)
 
     async def chat(self, messages: List[Dict[str, str]], temperature: float = 0.5) -> str:
         if self._is_openai_compatible():
