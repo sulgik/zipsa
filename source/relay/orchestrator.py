@@ -19,25 +19,27 @@ PROVIDERS = {
 }
 
 # Stage 3: local LLM applies the external answer back to the original personal context.
-# The external model answered an anonymized version of the query; this step re-introduces
-# the user's specific situation and delivers the final personalized response.
-LOCAL_PROMPT = """You are the final step of a local privacy gateway. The original question may contain personal context that was stripped before the external model answered. Your job is to deliver a final response that directly addresses the original question.
+# Uses placeholder-based grounding: external LLM sees [NAME_1], [PHONE_1] etc.
+# Local LLM restores real values and delivers a personalized final answer.
+LOCAL_PROMPT = """You are the final step of a local privacy gateway. The external model answered an anonymized version of the query using placeholders (e.g. [NAME_1], [PHONE_1]). Your job is to restore the real values and deliver a personalized final answer.
 
-ORIGINAL QUESTION:
+ORIGINAL QUESTION (with real personal details):
 {original_query}
 
-EXTERNAL ANSWER (produced from an anonymized version of the question):
+PLACEHOLDER MAPPING (placeholder → real value, local only):
+{binding_table}
+
+EXTERNAL ANSWER (uses placeholders, not real values):
 {external_answer}
 
 INSTRUCTIONS:
-1. Use the external answer as your primary source. Apply it to the specific context of the original question.
-2. Adjust any generic references to match the user's actual situation where relevant.
-3. If the external answer already fully addresses the original question, return it with minimal changes.
-4. Do not repeat or surface identifiers (SSNs, account numbers, contact details) in the answer.
-5. Do not add privacy warnings, disclaimers, or alerts — the gateway already handles that.
-6. Respond in the SAME LANGUAGE as the original question.
+1. Replace every placeholder in the external answer with the corresponding real value from the mapping above.
+2. If a placeholder does not appear in the external answer, ignore it.
+3. Do not surface raw identifiers like SSNs, credit card numbers, or account numbers — refer to them naturally (e.g. "your account" or "the patient").
+4. Strip any privacy warnings, disclaimers, or security notices that the external model may have added. Output ONLY the substantive answer.
+5. Respond in the SAME LANGUAGE as the original question.
 
-Write the final answer now:"""
+Write the final grounded answer now (no warnings, no disclaimers):"""
 
 
 class RelayOrchestrator:
@@ -104,7 +106,9 @@ class RelayOrchestrator:
         # 1c. If hybrid, reformulate for external use (LLM call) + PII verify output
         t0 = time.time()
 
-        _, pii_found, _, binding_map = self.safety.scan_and_redact(user_query)
+        redacted_query, pii_found, _, binding_map = self.safety.scan_and_redact(user_query)
+        # Also detect names in "Role: Name" context (e.g. "Patient: John D.")
+        redacted_query = self.safety.scan_names_in_context(redacted_query, binding_map)
         pii_types = list({k.strip("[]").split("_")[0] for k in binding_map.keys()})
 
         # Trace: PII scan result
@@ -134,8 +138,9 @@ class RelayOrchestrator:
 
         external_query = None
         if execution_path == "hybrid":
+            # Use pre-redacted query for reformulation so PII is already replaced with placeholders
             external_query = await self.ollama.reformulate(
-                text=user_query,
+                text=redacted_query,
                 conversation_context=sub_thread or None,
             )
             if not external_query:
@@ -153,7 +158,7 @@ class RelayOrchestrator:
                     print(f"[Stage 1] Reformulation leaked PII {list(leaked_binding.keys())[:3]} | Falling back to local-only")
                     external_query = None
                 else:
-                    print(f"[Stage 1] External query verified clean ({len(external_query)} chars)")
+                    print(f"[Stage 1] External query verified clean ({len(external_query)} chars): {external_query[:120]}")
 
         timings["planning_ms"] = (time.time() - t0) * 1000
         log_event(
@@ -235,10 +240,45 @@ class RelayOrchestrator:
             timings["local_ms"] = (time.time() - t0) * 1000
             print(f"[Stage 2] Fallback to local: {len(final_answer)} chars")
         else:
-            # ── Stage 3: Local — apply external answer to original context ────
+            # Strip leading disclaimer/warning paragraphs the external model may have injected.
+            # A paragraph is considered a "warning" if it contains refusal or privacy language
+            # but does NOT contain substantive domain content (medications, procedures, etc.).
+            import re as _re
+            _warn_re = _re.compile(
+                r'(?i)('
+                r'cannot\s+provide\s+(specific\s+)?(medical|legal|financial)\s+advice|'
+                r'important\s+(notice|disclaimer)|privacy\s+(warning|notice|alert|law)|'
+                r'must\s+never\s+be\s+shared|remove\s+(this|personal)\s+information|'
+                r'please\s+remove\s+PII|never\s+share.*SSN|SSN.*should\s+never|'
+                r'not\s+a\s+licensed\s+(healthcare|medical)|for\s+educational\s+purposes\s+only'
+                r')',
+            )
+            _content_re = _re.compile(
+                r'(?i)(metformin|sglt2|glp-1|insulin|hba1c|monitoring|interaction|'
+                r'revenue|growth|cash\s+flow|q[1-4]\s+|function|def\s+\w+|algorithm)',
+            )
+            paragraphs = _re.split(r'\n{2,}', external_answer.strip())
+            stripped = 0
+            while paragraphs and _warn_re.search(paragraphs[0]) and not _content_re.search(paragraphs[0]):
+                print(f"[Stage 2] Stripped warning paragraph ({stripped+1}): {paragraphs[0][:60]}...")
+                paragraphs.pop(0)
+                stripped += 1
+            if paragraphs:
+                external_answer = '\n\n'.join(paragraphs)
+            # ── Stage 3: Local — grounded synthesis with placeholder restoration ──
             t0 = time.time()
+            # Build binding table: show only name/entity placeholders (skip raw ID numbers)
+            safe_keys = {"NAME", "PERSON", "ORG", "COMPANY", "LOCATION", "DATE", "ROLE"}
+            binding_lines = []
+            for placeholder, real_value in binding_map.items():
+                ptype = placeholder.strip("[]").split("_")[0].upper()
+                if ptype in safe_keys:
+                    binding_lines.append(f"  {placeholder} → {real_value}")
+            binding_table = "\n".join(binding_lines) if binding_lines else "  (no named entities — answer applies as-is)"
+
             local_prompt = LOCAL_PROMPT.format(
                 original_query=user_query,
+                binding_table=binding_table,
                 external_answer=external_answer,
             )
             final_answer = await self.ollama.chat(
