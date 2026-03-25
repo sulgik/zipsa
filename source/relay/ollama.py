@@ -11,28 +11,45 @@ class OllamaClient:
         # API key for hosted Ollama endpoints (e.g. Ollama Cloud, custom deployments)
         self.api_key = api_key or os.getenv("LOCAL_API_KEY", "")
 
+    def _is_openai_compatible(self) -> bool:
+        """Detect if host is OpenAI-compatible (OpenRouter, vLLM, etc.) vs native Ollama."""
+        return not any(x in self.host for x in ["localhost", "127.0.0.1", "11434", "ollama.com/api"])
+
     async def chat(self, messages: List[Dict[str, str]], temperature: float = 0.5) -> str:
-        url = f"{self.host}/api/chat"
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "stream": False,
-            "think": False,
-            "options": {
-                "temperature": temperature
+        if self._is_openai_compatible():
+            # OpenAI-compatible endpoint (OpenRouter, vLLM, etc.)
+            url = f"{self.host}/chat/completions"
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": temperature,
+                "stream": False,
             }
-        }
-        
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
+            headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+            response_path = lambda result: result["choices"][0]["message"]["content"]
+        else:
+            # Native Ollama API
+            url = f"{self.host}/api/chat"
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "stream": False,
+                "think": False,
+                "options": {
+                    "temperature": temperature
+                }
+            }
+            headers = {"Content-Type": "application/json"}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            response_path = lambda result: result["message"]["content"]
 
         try:
             async with httpx.AsyncClient(timeout=600.0) as client:
                 response = await client.post(url, json=payload, headers=headers)
                 response.raise_for_status()
                 result = response.json()
-                return result['message']['content'].strip()
+                return response_path(result).strip()
         except Exception as e:
             print(f"[Ollama Error] {e}")
             return ""
