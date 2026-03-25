@@ -118,21 +118,33 @@ Ran it on 100 real conversations with sensitive workloads — medical, legal, fi
 - ✅ **OpenAI-compatible API** — drop-in replacement for any LLM client
 - ✅ **Multi-provider** — works with Claude, Gemini, or OpenAI
 
-## Quick Start
+## Already using Ollama?
 
-Zipsa just needs two things: **an LLM endpoint** (local or cloud) and **an external provider API key**.
+Add Zipsa in 3 steps:
 
-### Option A: Local Ollama (max privacy)
-
+**1. Clone and configure**
 ```bash
 git clone https://github.com/sulgik/zipsa.git
 cd zipsa
 cp .env.example .env
-# .env: LOCAL_HOST=http://localhost:11434, ANTHROPIC_API_KEY=sk-...
-ollama pull qwen3.5:9b
-docker-compose up -d
-curl http://localhost:8000/health
+# Add your Claude/GPT API key to .env
 ```
+
+**2. Start Zipsa**
+```bash
+docker-compose up -d
+```
+
+**3. Point your app to Zipsa instead of Ollama**
+```
+Before: http://localhost:11434
+After:  http://localhost:8000
+```
+
+Your queries are now PII-filtered before hitting the cloud. That's it.
+
+<details>
+<summary><strong>Advanced Setup Options</strong></summary>
 
 ### Option B: Ollama Cloud (no local install)
 
@@ -152,7 +164,7 @@ curl http://localhost:8000/health
 docker-compose up -d
 ```
 
-### Option D: Cloud-hosted Zipsa (gateway only — no local Docker needed)
+### Option D: Cloud-hosted Zipsa (gateway only)
 
 Run Zipsa in the cloud. You supply both LLM endpoints via env.
 
@@ -165,11 +177,8 @@ docker-compose -f docker-compose.cloud.yml up -d
 # LOCAL_API_KEY=your-ollama-key
 # ANTHROPIC_API_KEY=sk-...
 ```
-```
 
-### Or Local (Native Python)
-
-Two install modes:
+### Native Python Install
 
 ```bash
 # Try it out — PII detection + routing engine only
@@ -190,6 +199,8 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 > ```
 
 > **Advanced:** Pick only what you need — `server`, `claude`, `gemini`, `openai`, `auth`, `monitor`. See [pyproject.toml](pyproject.toml).
+
+</details>
 
 ## Using Zipsa
 
