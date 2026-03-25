@@ -1,18 +1,20 @@
 """
 Selective Query Router for Zipsa Privacy Gateway.
 
-두 가지 라우팅 전략을 모두 지원합니다:
+Supports two routing strategies:
 
 ── Selective Routing (route_query_selective) ──────────────────────────────────
-  단일 경로: 쿼리를 LOCAL 또는 EXTERNAL 중 하나로 라우팅.
+  Single-path: routes the query to either LOCAL or EXTERNAL.
   1. PII severity threshold override  → force LOCAL
   2. Fast heuristic patterns (<1 ms, keyword/regex)
   3. LLM-based classification (Ollama, ~2-5 s) when heuristic is inconclusive
 
 ── Dual-Path Synthesis (route_query_dual) ─────────────────────────────────────
-  이중 경로: 로컬 LLM이 직접 응답(3a) + 프로토콜 LLM 응답(3b) → 로컬 합성(4).
-  LLM 카테고리 분류 없이 PII severity 점수만으로 외부 전송 가능 여부를 결정.
-  (LLM classifier 정확도 낮음 → 결정론적 threshold 방식으로 대체)
+  Dual-path: local LLM answers directly (3a) + external LLM answers reformulated (3b)
+  → local synthesis (4).
+  Routing decision uses PII severity score only (no LLM classifier), since
+  LLM-based classification has low reliability and is replaced by a deterministic
+  threshold approach.
 
 PII Severity reference (empirically calibrated):
   ID / SSN        10  →  highest-risk; almost always force local

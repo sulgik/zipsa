@@ -1,5 +1,28 @@
 # Zipsa Onboarding for Ollama Users
 
+## Quick Setup (Recommended)
+
+Run the interactive setup wizard — it configures your `.env` automatically:
+
+```bash
+git clone https://github.com/sulgik/zipsa.git
+cd zipsa
+python3 setup.py
+```
+
+Then start Zipsa:
+
+```bash
+docker compose up -d
+open http://localhost:8000
+```
+
+That's it. The wizard handles provider selection, API key / Claude Max setup-token, and Ollama model detection.
+
+---
+
+## Manual Setup (Step-by-Step)
+
 You're already running Ollama locally for privacy. But sometimes you need Claude or GPT for complex tasks. Zipsa sits between your app and the cloud — filtering PII before anything leaves your machine.
 
 **Time to set up:** ~5 minutes
