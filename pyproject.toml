@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "zipsa"
+version = "0.1.0"
+description = "Privacy-aware LLM proxy — keeps PII out of cloud models"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+
+# ── Core (always required) ────────────────────────────────────────────────────
+# Minimal install: PII detection + routing engine only.
+# pip install zipsa
+dependencies = [
+    "httpx>=0.27.0",
+    "pydantic>=2.9.0",
+]
+
+[project.optional-dependencies]
+
+# ── Server (REST API) ─────────────────────────────────────────────────────────
+# pip install "zipsa[server]"
+server = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.27.0",
+]
+
+# ── Provider SDKs (install the SDK for whichever cloud provider you want to use)
+# pip install "zipsa[claude]"   → Anthropic SDK (to call Claude API)
+claude = ["anthropic>=0.18.0"]
+
+# pip install "zipsa[gemini]"   → Google SDK (to call Gemini API)
+gemini = [
+    "google-genai>=1.64.0",
+    "google-auth>=2.28.0",
+]
+
+# pip install "zipsa[openai]"   → OpenAI SDK (to call GPT API)
+openai = ["openai>=1.0.0"]
+
+# All provider SDKs at once
+# pip install "zipsa[providers]"
+providers = [
+    "anthropic>=0.18.0",
+    "google-genai>=1.64.0",
+    "google-auth>=2.28.0",
+    "openai>=1.0.0",
+]
+
+# ── OAuth support ─────────────────────────────────────────────────────────────
+# pip install "zipsa[auth]"
+auth = ["cryptography>=42.0.0"]
+
+# ── Monitoring dashboard (enterprise) ────────────────────────────────────────
+# pip install "zipsa[monitor]"
+monitor = ["gradio>=4.0.0"]
+
+# ── Full install (server + all provider SDKs + OAuth + monitoring) ────────────
+# pip install "zipsa[full]"
+full = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.27.0",
+    "anthropic>=0.18.0",
+    "google-genai>=1.64.0",
+    "google-auth>=2.28.0",
+    "openai>=1.0.0",
+    "cryptography>=42.0.0",
+    "gradio>=4.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/sulgik/zipsa"
+Repository = "https://github.com/sulgik/zipsa"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["source*"]

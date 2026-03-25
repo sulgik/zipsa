@@ -144,10 +144,27 @@ curl http://localhost:8000/health
 
 ### Or Local (Native Python)
 
+Two install modes:
+
 ```bash
-pip install -r requirements.txt
+# Try it out — PII detection + routing engine only
+pip install zipsa
+
+# Full setup — server + all provider SDKs + OAuth + monitoring dashboard
+pip install "zipsa[full]"
+```
+
+Then start:
+```bash
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+
+> **Monitoring dashboard** (included in `full`):
+> ```bash
+> python -m source.monitor.dashboard --port 7861
+> ```
+
+> **Advanced:** Pick only what you need — `server`, `claude`, `gemini`, `openai`, `auth`, `monitor`. See [pyproject.toml](pyproject.toml).
 
 ## Using Zipsa
 

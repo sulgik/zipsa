@@ -360,10 +360,10 @@ async def route_query_selective(
         return await route_with_llm(query, ollama_client, sensitivity_score=sensitivity)
 
     return RoutingDecision(
-        route="external",
+        route="local",
         category="unknown",
         confidence="medium",
-        reason="No classifier available — defaulting to external",
+        reason="No classifier available — fail-safe: defaulting to local",
         sensitivity_score=sensitivity,
     )
 
