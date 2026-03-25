@@ -1,13 +1,12 @@
-# Zipsa — Local-First Privacy Gateway for LLM Apps
+# Zipsa — Use Claude/GPT/Gemini Without Sending Your Raw Private Data
 
-> Use frontier models without handing over your raw private context, internal knowledge, or secrets.
+> Your prompts contain PII, internal context, and secrets. Zipsa rewrites them before they hit the cloud — then applies the cloud answer back to your actual situation.
 
-**TL;DR:** Zipsa is an OpenAI-compatible gateway that sits between your app and Claude, ChatGPT, or Gemini. It inspects each request locally, decides which parts are identity-bound, company-confidential, or safe to abstract, and routes only the prompts that genuinely need cloud knowledge. When it does call the cloud, it rewrites the prompt to remove identifying or proprietary details while preserving the technical, legal, clinical, or operational facts that matter. You get the upside of cloud models without sending raw personal or internal context upstream.
+**TL;DR:** Drop Zipsa between your app and any LLM. It detects sensitive data, rewrites your prompt to remove it, calls the cloud model, and re-applies the answer to your original context. You get cloud-quality answers without exposing raw personal or internal data.
 
-![Privacy First](https://img.shields.io/badge/privacy-local--first-1f6feb)
+[![CI](https://github.com/sulgik/zipsa/actions/workflows/ci.yml/badge.svg)](https://github.com/sulgik/zipsa/actions/workflows/ci.yml)
 ![OpenAI Compatible](https://img.shields.io/badge/api-openai--compatible-0a7f5a)
 ![Ollama](https://img.shields.io/badge/local%20llm-Ollama-222222)
-![Hybrid Routing](https://img.shields.io/badge/routing-local%20%7C%20hybrid-b35c00)
 
 ## Why This Matters
 
@@ -20,8 +19,6 @@ Zipsa solves this by:
 - **Hybrid mode:** gets the best of both — local privacy + cloud knowledge
 
 Drop it in front of any OpenAI-compatible client (like OpenClaw) and forget about it.
-
-> ⚠️ **Experimental software.** APIs might change. Use for evaluation, not production yet.
 
 ## How It Works
 
@@ -329,6 +326,8 @@ Tokens are kept in memory by default. Set `TOKEN_ENCRYPTION_KEY` to persist them
 | `OAUTH_REDIRECT_BASE` | `http://localhost:8000` | Base URL for OAuth callbacks |
 | `TOKEN_ENCRYPTION_KEY` | — | Fernet key; enables encrypted token persistence |
 | `DEMO_MODE` | `true` | Skip auth checks when true |
+
+> ⚠️ **Experimental software.** APIs might change. Use for evaluation, not production yet.
 
 ## License
 
