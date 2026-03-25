@@ -5,9 +5,11 @@ import time
 from typing import List, Dict, Any
 
 class OllamaClient:
-    def __init__(self, model: str = None, host: str = None):
+    def __init__(self, model: str = None, host: str = None, api_key: str = None):
         self.model = model or os.getenv("LOCAL_MODEL", "qwen3.5:9b")
-        self.host = host or os.getenv("LOCAL_HOST", "http://localhost:11434")
+        self.host = (host or os.getenv("LOCAL_HOST", "http://localhost:11434")).rstrip("/")
+        # API key for hosted Ollama endpoints (e.g. Ollama Cloud, custom deployments)
+        self.api_key = api_key or os.getenv("LOCAL_API_KEY", "")
 
     async def chat(self, messages: List[Dict[str, str]], temperature: float = 0.5) -> str:
         url = f"{self.host}/api/chat"
@@ -21,9 +23,13 @@ class OllamaClient:
             }
         }
         
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
         try:
             async with httpx.AsyncClient(timeout=600.0) as client:
-                response = await client.post(url, json=payload)
+                response = await client.post(url, json=payload, headers=headers)
                 response.raise_for_status()
                 result = response.json()
                 return result['message']['content'].strip()

@@ -120,23 +120,36 @@ Ran it on 100 real conversations with sensitive workloads — medical, legal, fi
 
 ## Quick Start
 
-### What You Need
+Zipsa just needs two things: **an LLM endpoint** (local or cloud) and **an external provider API key**.
 
-- Docker & Docker Compose
-- Ollama running locally (`localhost:11434`)
-- A local Ollama model (default: `qwen3.5:9b`)
-- API key for Claude, Gemini, or OpenAI
-
-### Docker (Easy)
+### Option A: Local Ollama (max privacy)
 
 ```bash
 git clone https://github.com/sulgik/zipsa.git
 cd zipsa
 cp .env.example .env
-# Edit .env — pick your provider (claudeAPI key, etc)
+# .env: LOCAL_HOST=http://localhost:11434, ANTHROPIC_API_KEY=sk-...
 ollama pull qwen3.5:9b
 docker-compose up -d
 curl http://localhost:8000/health
+```
+
+### Option B: Ollama Cloud (no local install)
+
+```bash
+git clone https://github.com/sulgik/zipsa.git
+cd zipsa
+cp .env.example .env
+# .env: LOCAL_HOST=https://api.ollama.com, LOCAL_API_KEY=<ollama-key>, ANTHROPIC_API_KEY=sk-...
+docker-compose up -d
+curl http://localhost:8000/health
+```
+
+### Option C: Any OpenAI-compatible endpoint (on-prem / vLLM / LM Studio)
+
+```bash
+# .env: LOCAL_HOST=http://your-llm-server:8080, ANTHROPIC_API_KEY=sk-...
+docker-compose up -d
 ```
 
 ### Or Local (Native Python)
