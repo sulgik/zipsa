@@ -4,7 +4,7 @@ Usage:
     uvicorn main:app --host 0.0.0.0 --port 8000
 """
 import os
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import FileResponse
@@ -81,6 +81,7 @@ async def relay_endpoint(
 @app.get("/")
 async def chat_ui():
     return FileResponse("source/ui/chat.html")
+
 
 
 @app.get("/health")
