@@ -1,5 +1,9 @@
 # Zipsa — Use Claude/GPT/Gemini Without Sending Your Raw Private Data
 
+<p align="center">
+  <img src="zipsa.jpg" width="220" alt="Zipsa — your privacy-first LLM butler" />
+</p>
+
 > Your prompts contain PII, internal context, and secrets. Zipsa rewrites them before they hit the cloud — then applies the cloud answer back to your actual situation.
 
 **TL;DR:** Drop Zipsa between your app and any LLM. It detects sensitive data, rewrites your prompt to remove it, calls the cloud model, and re-applies the answer to your original context. You get cloud-quality answers without exposing raw personal or internal data.
@@ -31,6 +35,20 @@ Drop it in front of any OpenAI-compatible client (like OpenClaw) and forget abou
    - **Hybrid?** → reformulate (rewrite entire query to remove identity, proprietary context, and secrets) → send to cloud → bring the answer back
 4. **Safety scan** — Did anything slip through? If yes, use local answer instead
 5. **Synthesize** — Apply cloud answer to *your* actual context (if hybrid)
+
+```mermaid
+flowchart LR
+    Q([Your Query]) --> S["🔍 Local Scan\nPII · credentials · risks"]
+    S --> C{Classify}
+    C -->|private-only| L["🏠 Local Model\nstays in your zone"]
+    C -->|hybrid| R["✏️ Reformulate\nstrip identity, abstract context"]
+    R --> E["☁️ Cloud Model\nsees abstracted query"]
+    E --> V{Safety Scan}
+    V -->|clean| SY["🔗 Synthesize\napply to your actual context"]
+    V -->|leak detected| L
+    SY --> A([Your Answer])
+    L --> A
+```
 
 **Concrete example (semantic reformulation in action):**
 - **Your query (local):** "Jane Smith (SSN 123-45-6789), senior ER physician. HbA1c 8.4% on metformin 2000mg + sitagliptin 100mg (eGFR 62). Treatment options?"
@@ -92,21 +110,43 @@ This way you get privacy *and* continuity.
 
 ## Does It Actually Work?
 
-Ran it on 100 real conversations with sensitive workloads — medical, legal, finance, security, and internal ops.
+Ran on 100 real conversations — medical, legal, finance, security, internal ops.
 
-**Results:**
+**The short version: you lose 1 quality point. You cut data exposure by 65%.**
 
-| | Privacy Risk | Your Data Safe | Answer Quality |
-| ---- | ---- | ---- | ---- |
-| Local-only | 0% | 100% | 73/100 |
-| **Zipsa** | **9%** | **91%** | **78/100** |
-| Cloud-direct | 26% | 72% | 79/100 |
+---
 
-**What this means:**
-- Zipsa keeps 36% of queries 100% local (zero privacy risk)
-- Reformulates the other 64% before sending
-- Cuts privacy exposure risk by 2/3
-- Barely loses anything on answer quality
+|  | Data exposed to cloud | Answer quality |
+|--|--|--|
+| Send everything | 26% | 79 / 100 |
+| **Zipsa** | **9%** | **78 / 100** |
+| Never send anything | 0% | 73 / 100 |
+
+```mermaid
+xychart-beta
+    title "Data exposed to cloud (bar) vs Answer quality (line)"
+    x-axis ["Cloud-direct", "Zipsa", "Local-only"]
+    y-axis "%" 0 --> 100
+    bar [26, 9, 0]
+    line [79, 78, 73]
+```
+
+---
+
+There used to be a forced choice: cloud AI meant your data left your hands; local AI meant worse answers. Zipsa dissolves it.
+
+**vs. cloud-direct:** −1 quality point. −65% exposure.
+**vs. local-only:** +5 quality points. Privacy still near-intact.
+
+Zipsa sits in a position that didn't exist before — near-cloud quality, near-local privacy.
+
+---
+
+**What's happening under the hood:**
+
+- **36% of queries** never touch the cloud at all. Local model handles them entirely. These are cases Zipsa is certain about: high-risk PII, crisis content, injection attempts.
+- **64% of queries** are reformulated — identity stripped, proprietary context abstracted — before any cloud call. The cloud sees a question, not *your* question.
+- The 9% residual is the hard cases: enough context to make reformulation imperfect, not enough to force local-only. Work in progress.
 
 ## What You Get
 
