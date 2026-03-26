@@ -188,6 +188,11 @@ class ClassifierTags:
     # Natural language PII signals (sentence-level, independent of regex scan)
     nl_pii_detected: bool = False       # True if NL_PII_PATTERNS matched
 
+    # Semantic harm categories (derived from all signals above)
+    # Values: PERSONAL_PRIVACY | ORGANIZATIONAL_CONFIDENTIAL | SECURITY_RISK |
+    #         REGULATORY_EXPOSURE | ADVERSARIAL_INTENT
+    harm_categories: List[str] = field(default_factory=list)
+
 
 @dataclass
 class PlannerProposal:
@@ -343,7 +348,36 @@ def classify(
         tags.task_confidence = "medium"
         tags.task_kind = TASK_KIND_MAP["information_request"]
 
+    tags.harm_categories = _derive_harm_categories(tags)
     return tags
+
+
+_PERSONAL_PII = frozenset({
+    "NAME", "EMAIL", "PHONE", "SSN", "RRN", "PASSPORT",
+    "CARD_NUMBER", "CREDIT_CARD", "PERSON", "DOB",
+})
+_ORGANIZATIONAL_PII = frozenset({"ORG", "COMPANY", "BIZ_REG"})
+_SECURITY_PII = frozenset({"AWS_KEY_ID", "GITHUB_TOKEN", "API_KEY", "PASSWORD", "TOKEN"})
+_FINANCIAL_PII = frozenset({"AMOUNT", "CARD_NUMBER", "ACCOUNT_ID", "BANK"})
+
+
+def _derive_harm_categories(tags: ClassifierTags) -> List[str]:
+    """Map low-level classifier signals → semantic harm categories (rubric v1)."""
+    cats: List[str] = []
+    pii_set = set(tags.pii_types)
+
+    if pii_set & _PERSONAL_PII or tags.crisis_risk or tags.nl_pii_detected:
+        cats.append("PERSONAL_PRIVACY")
+    if pii_set & _ORGANIZATIONAL_PII:
+        cats.append("ORGANIZATIONAL_CONFIDENTIAL")
+    if pii_set & _SECURITY_PII:
+        cats.append("SECURITY_RISK")
+    if pii_set & _FINANCIAL_PII:
+        cats.append("REGULATORY_EXPOSURE")
+    if tags.injection_risk == "high" or tags.exfiltration_risk:
+        cats.append("ADVERSARIAL_INTENT")
+
+    return cats
 
 
 # ── Layer 2: Planner ───────────────────────────────────────────────────────────

@@ -53,6 +53,8 @@ class RelayResponse(BaseModel):
     trace_id: str
     pii_detected: bool = False
     pii_types: list = []
+    harm_categories: list = []
+    presidio_baseline: Optional[str] = None
     trace: list[str] = []
 
 

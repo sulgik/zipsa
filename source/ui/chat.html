@@ -269,9 +269,19 @@ function addStep(icon, title, bodyHtml, state='done') {
   return card;
 }
 
+const HARM_LABEL = {
+  PERSONAL_PRIVACY:          { icon: '&#128100;', label: 'Personal Privacy',         color: '#5a8abf' },
+  ORGANIZATIONAL_CONFIDENTIAL:{ icon: '&#127970;', label: 'Org Confidential',          color: '#bf8a5a' },
+  SECURITY_RISK:             { icon: '&#128272;', label: 'Security Risk',             color: '#bf5a5a' },
+  REGULATORY_EXPOSURE:       { icon: '&#9878;',   label: 'Regulatory Exposure',       color: '#8abf5a' },
+  ADVERSARIAL_INTENT:        { icon: '&#9888;',   label: 'Adversarial Intent',        color: '#bf5abf' },
+};
+
 function renderInspector(data) {
   clearSteps();
   const pii = data.pii_types || [];
+  const harmCats = data.harm_categories || [];
+  const presidioBaseline = data.presidio_baseline || null;
   const route = (data.provider || 'unknown').toLowerCase();
   const latency = Math.round(data.latency_ms || 0);
   const reformulated = (data.steps && data.steps.reformulated_query) || data.reformulated_query || null;
@@ -279,7 +289,10 @@ function renderInspector(data) {
 
   // Badge
   const badge = document.getElementById('privacy-badge');
-  if (pii.length > 0) {
+  if (harmCats.length > 0) {
+    badge.className = 'badge-warn';
+    badge.textContent = harmCats.map(c => HARM_LABEL[c]?.label || c).join(' · ');
+  } else if (pii.length > 0) {
     badge.className = 'badge-warn';
     badge.textContent = `${pii.length} PII field${pii.length>1?'s':''} caught`;
   } else {
@@ -291,11 +304,17 @@ function renderInspector(data) {
   addStep('&#128229;', 'Query received',
     `<table class="kv-table"><tr><td>Content</td><td>${escHtml((query||'').slice(0,80))}${query.length>80?'…':''}</td></tr></table>`);
 
-  // Step 2: PII scan
-  if (pii.length > 0) {
-    const tags = pii.map(t => `<span class="tag pii">${escHtml(t)}</span>`).join(' ');
-    addStep('&#128270;', `PII scan — ${pii.length} item${pii.length>1?'s':''} detected`,
-      `<div class="tag-row">${tags}</div><div style="font-size:11px;color:var(--lgray);margin-top:8px;">Sensitive fields removed before cloud request.</div>`);
+  // Step 2: PII scan + harm categories
+  if (pii.length > 0 || harmCats.length > 0) {
+    const piiTags = pii.map(t => `<span class="tag pii">${escHtml(t)}</span>`).join(' ');
+    const harmTags = harmCats.map(c => {
+      const h = HARM_LABEL[c] || { icon: '⚠', label: c, color: '#888' };
+      return `<span class="tag pii" style="border-color:${h.color};color:${h.color};">${h.icon} ${h.label}</span>`;
+    }).join(' ');
+    addStep('&#128270;', `PII scan — ${pii.length} field${pii.length!==1?'s':''} detected`,
+      `<div class="tag-row">${piiTags}</div>`
+      + (harmCats.length > 0 ? `<div class="tag-row" style="margin-top:6px;">${harmTags}</div>` : '')
+      + `<div style="font-size:11px;color:var(--lgray);margin-top:8px;">Sensitive fields removed before cloud request.</div>`);
   } else {
     addStep('&#128270;', 'PII scan — clean',
       `<div class="tag-row"><span class="tag safe">NO PII</span></div>`);
@@ -316,8 +335,14 @@ function renderInspector(data) {
   addStep('&#8646;', 'Route decision',
     `<div class="tag-row">${routeTag}</div><div style="font-size:11px;color:var(--lgray);margin-top:6px;">${routeLabel}</div>`);
 
-  // Step 4: Reformulated query (shown whenever available)
-  if (reformulated) {
+  // Step 4: Presidio comparison (when semantic reformulation added value)
+  if (reformulated && presidioBaseline && presidioBaseline !== reformulated) {
+    addStep('&#9878;', 'Presidio vs Zipsa',
+      `<div style="font-size:11px;color:var(--lgray);margin-bottom:6px;">Presidio (regex-only) would have sent:</div>`
+      + `<div class="code-block" style="opacity:0.6;border-color:#5a3a3a;">${escHtml(presidioBaseline.slice(0,200))}${presidioBaseline.length>200?'…':''}</div>`
+      + `<div style="font-size:11px;color:var(--lgray);margin:6px 0;">Zipsa sent (semantic reformulation):</div>`
+      + `<div class="code-block">${escHtml(reformulated.slice(0,200))}${reformulated.length>200?'…':''}</div>`);
+  } else if (reformulated) {
     addStep('&#9998;', 'Reformulated for cloud',
       `<div class="code-block">${escHtml(reformulated)}</div>`);
   }

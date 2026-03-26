@@ -175,6 +175,7 @@ class RelayOrchestrator:
                 else:
                     print(f"[Stage 1] External query verified clean ({len(external_query)} chars): {external_query[:120]}")
 
+        harm_categories = formal_decision.classifier_tags.harm_categories
         timings["planning_ms"] = (time.time() - t0) * 1000
         log_event(
             trace_id, "planning", raw_input=user_query,
@@ -183,6 +184,7 @@ class RelayOrchestrator:
                 "external_query": external_query,
                 "formal_reason": formal_decision.reason_code,
                 "pii_types": pii_types,
+                "harm_categories": harm_categories,
                 "injection_risk": formal_decision.classifier_tags.injection_risk,
             },
             provider="formal_planner", latency_ms=timings["planning_ms"],
@@ -237,6 +239,8 @@ class RelayOrchestrator:
                 "trace_id": trace_id,
                 "pii_detected": pii_found,
                 "pii_types": pii_types,
+                "harm_categories": harm_categories,
+                "presidio_baseline": redacted_query if pii_found else None,
                 "trace": trace,
             }
 
@@ -365,5 +369,7 @@ class RelayOrchestrator:
             "trace_id": trace_id,
             "pii_detected": pii_found,
             "pii_types": pii_types,
+            "harm_categories": harm_categories,
+            "presidio_baseline": redacted_query if pii_found else None,
             "trace": trace,
         }
