@@ -35,8 +35,8 @@ EXTERNAL ANSWER (uses placeholders, not real values):
 
 INSTRUCTIONS:
 1. Replace every placeholder in the external answer with the corresponding real value from the mapping above.
-2. If a placeholder does not appear in the external answer, ignore it.
-3. Do not surface raw identifiers like SSNs, credit card numbers, or account numbers — refer to them naturally (e.g. "your account" or "the patient").
+2. If the external answer refers generically to "the patient", "a patient", "the user", "the client", or similar, replace those references with the real name from the mapping (e.g. "John D.") where it reads naturally.
+3. Do not surface raw identifiers like SSNs, credit card numbers, or account numbers — refer to them naturally (e.g. "your account").
 4. Strip any privacy warnings, disclaimers, or security notices that the external model may have added. Output ONLY the substantive answer.
 5. Respond in the SAME LANGUAGE as the original question.
 
@@ -313,18 +313,22 @@ class RelayOrchestrator:
                     binding_lines.append(f"  {placeholder} → {real_value}")
             binding_table = "\n".join(binding_lines) if binding_lines else "  (no named entities — answer applies as-is)"
 
-            # Skip synthesis when the external answer contains no placeholders —
-            # calling the local LLM with nothing to substitute tends to produce
-            # "I need more context" responses instead of the actual answer.
+            # Run synthesis if: placeholders present in external answer, OR
+            # named-entity bindings exist (name/person restoration needed even
+            # when the external model referred generically to "the patient").
             import re as _re_ph
             _placeholders_found = _re_ph.findall(
                 r'\[(?:NAME|PERSON|ORG|COMPANY|LOCATION|DATE|ROLE)_\d+\]',
                 external_answer,
             )
-            if not _placeholders_found:
+            _has_name_bindings = any(
+                placeholder.strip("[]").split("_")[0].upper() in {"NAME", "PERSON"}
+                for placeholder in binding_map
+            )
+            if not _placeholders_found and not _has_name_bindings:
                 final_answer = external_answer
                 timings["local_ms"] = 0.0
-                print("[Stage 3] No placeholders in external answer — skipping synthesis")
+                print("[Stage 3] No placeholders or name bindings — skipping synthesis")
             else:
                 local_prompt = LOCAL_PROMPT.format(
                     original_query=user_query,
