@@ -24,12 +24,6 @@ Zipsa solves this by:
 
 Drop it in front of any OpenAI-compatible client (like OpenClaw) and forget about it.
 
-## Demo
-
-![Zipsa UI — medical scenario with privacy log](docs/assets/ui_demo.png)
-
-*Medical query: SSN and patient identity stay local. Cloud sees only anonymized clinical context. Answer is grounded back to John D.*
-
 ## How It Works
 
 **Your query comes in →**

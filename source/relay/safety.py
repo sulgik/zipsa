@@ -42,8 +42,8 @@ _ROLE_LABEL_RE = re.compile(
     r'Member|Applicant|Subject|Insured|Beneficiary|Contact|Sender|Recipient|'
     r'Payer|Subscriber|Dependent|Guardian|Student|Candidate|Name|Account\s+[Hh]older|'
     r'Policy\s+[Hh]older|Representative|Requestor|Claimant|Appellant)'
-    r'\s*:\s*'
-    r'([A-Z][a-zA-Z\'\-]+(?:\s+[A-Z][a-zA-Z\'\-]+){1,3})\b'
+    r'(?:\s+\w+)*\s*:\s*'                             # allow "Patient info:" style prefixes
+    r'([A-Z][a-zA-Z\'\-]+(?:\s+[A-Z][a-zA-Z\'\-]*\.?){0,3})'  # allow abbreviated last names like "D."
 )
 
 

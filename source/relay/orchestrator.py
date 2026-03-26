@@ -35,7 +35,7 @@ EXTERNAL ANSWER (uses placeholders, not real values):
 
 INSTRUCTIONS:
 1. Replace every placeholder in the external answer with the corresponding real value from the mapping above.
-2. If the external answer refers generically to "the patient", "a patient", "the user", "the client", or similar, replace those references with the real name from the mapping (e.g. "John D.") where it reads naturally.
+2. If the external answer refers generically to "the patient", "a patient", "the user", "the client", or similar, replace those references with the real name found in the ORIGINAL QUESTION (e.g. "John D.") where it reads naturally. Do not use placeholder names — use the actual name from the original question.
 3. Do not surface raw identifiers like SSNs, credit card numbers, or account numbers — refer to them naturally (e.g. "your account").
 4. Strip any privacy warnings, disclaimers, or security notices that the external model may have added. Output ONLY the substantive answer.
 5. Respond in the SAME LANGUAGE as the original question.
@@ -325,10 +325,31 @@ class RelayOrchestrator:
                 placeholder.strip("[]").split("_")[0].upper() in {"NAME", "PERSON"}
                 for placeholder in binding_map
             )
-            if not _placeholders_found and not _has_name_bindings:
+            # Pre-substitute: when NAME bindings exist, replace generic "the patient" /
+            # "a patient" / "the user" / "the client" references with [NAME] so that
+            # Stage 3 can do reliable mechanical substitution instead of relying on
+            # the local model to infer the name from the original query.
+            if _has_name_bindings:
+                _name_key = next(
+                    (k for k in binding_map if k.strip("[]").split("_")[0].upper() in {"NAME", "PERSON"}),
+                    None,
+                )
+                if _name_key:
+                    import re as _re_generic
+                    _generic_re = _re_generic.compile(
+                        r'\b(the patient|a patient|the user|a user|the client|a client|the individual|a individual|the person|a person)\b',
+                        _re_generic.IGNORECASE,
+                    )
+                    _pre_subst = _generic_re.sub(_name_key, external_answer)
+                    if _pre_subst != external_answer:
+                        print(f"[Stage 3] Pre-substituted generic references → {_name_key}")
+                        external_answer = _pre_subst
+                        _placeholders_found = [_name_key]  # ensure synthesis runs
+
+            if not _placeholders_found and not _has_name_bindings and not pii_found:
                 final_answer = external_answer
                 timings["local_ms"] = 0.0
-                print("[Stage 3] No placeholders or name bindings — skipping synthesis")
+                print("[Stage 3] No placeholders, name bindings, or PII — skipping synthesis")
             else:
                 local_prompt = LOCAL_PROMPT.format(
                     original_query=user_query,
