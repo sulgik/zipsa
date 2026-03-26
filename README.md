@@ -112,33 +112,35 @@ This way you get privacy *and* continuity.
 
 Ran on 100 real conversations — medical, legal, finance, security, internal ops.
 
-**The short version: you lose 1 quality point. You cut data exposure by 65%.**
+**65% less risk. 1% less quality.**
+
+Cloud-direct = 100. Here's where everything lands:
 
 ---
 
-|  | Data exposed to cloud | Answer quality |
+|  | Privacy risk | Answer quality |
 |--|--|--|
-| Send everything | 26% | 79 / 100 |
-| **Zipsa** | **9%** | **78 / 100** |
-| Never send anything | 0% | 73 / 100 |
+| Send everything (cloud) | 100 | 100 |
+| **Zipsa** | **35** | **99** |
+| Never send anything (local) | 0 | 92 |
 
 ```mermaid
 xychart-beta
-    title "Data exposed to cloud (bar) vs Answer quality (line)"
+    title "Privacy risk (bar) vs Answer quality (line)  —  cloud-direct = 100"
     x-axis ["Cloud-direct", "Zipsa", "Local-only"]
-    y-axis "%" 0 --> 100
-    bar [26, 9, 0]
-    line [79, 78, 73]
+    y-axis "Index  (cloud = 100)" 0 --> 100
+    bar [100, 35, 0]
+    line [100, 99, 92]
 ```
 
 ---
 
-There used to be a forced choice: cloud AI meant your data left your hands; local AI meant worse answers. Zipsa dissolves it.
+The bar collapses. The line barely moves.
 
-**vs. cloud-direct:** −1 quality point. −65% exposure.
-**vs. local-only:** +5 quality points. Privacy still near-intact.
+**vs. cloud-direct:** −65% privacy risk. −1% quality.
+**vs. local-only:** +7% quality. Privacy still near-intact (35 vs 0).
 
-Zipsa sits in a position that didn't exist before — near-cloud quality, near-local privacy.
+There used to be a forced choice: cloud AI meant your data left your hands; local AI meant worse answers. Zipsa dissolves it — near-cloud quality, near-local privacy.
 
 ---
 
