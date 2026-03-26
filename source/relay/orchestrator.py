@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 import time
 from typing import Dict, Any
@@ -40,6 +41,20 @@ INSTRUCTIONS:
 5. Respond in the SAME LANGUAGE as the original question.
 
 Write the final grounded answer now (no warnings, no disclaimers):"""
+
+
+def _is_satisfying(answer: str) -> bool:
+    """Heuristic: is the external answer substantive enough to use?"""
+    if not answer or len(answer.strip()) < 50:
+        return False
+    lower = answer.lower()
+    refusal_signals = [
+        "i cannot ", "i can't ", "i'm unable", "i am unable",
+        "as an ai, i", "i don't have access", "i'm not able to",
+        "cannot assist", "can't assist", "unable to assist",
+        "i apologize, but i cannot", "i'm sorry, but i cannot",
+    ]
+    return not any(sig in lower for sig in refusal_signals)
 
 
 class RelayOrchestrator:
@@ -225,20 +240,38 @@ class RelayOrchestrator:
                 "trace": trace,
             }
 
-        # ── Stage 2: Hybrid — external inference ─────────────────────────────
+        # ── Stage 2: Hybrid — parallel external + local prefetch ─────────────
+        # Local inference starts immediately alongside the external call.
+        # If external is blocked or unsatisfying, local_prefetch is used directly,
+        # avoiding a second sequential local call.
+        async def _run_local_prefetch() -> str:
+            return await local_provider.generate_async_messages(main_messages) or ""
+
         t0 = time.time()
-        external_answer, blocked = await _run_external()
-        timings["external_ms"] = (time.time() - t0) * 1000
+        (external_answer, blocked), local_prefetch = await asyncio.gather(
+            _run_external(),
+            _run_local_prefetch(),
+        )
+        parallel_ms = (time.time() - t0) * 1000
+        timings["external_ms"] = parallel_ms  # wall time (ran in parallel)
+        timings["local_prefetch_ms"] = parallel_ms
         log_event(trace_id, "external", raw_input=external_query, raw_output=external_answer,
                   provider=self.config.external_provider, latency_ms=timings["external_ms"],
                   safety_flags={"blocked": blocked})
-        print(f"[Stage 2] External: {len(external_answer)} chars ({timings['external_ms']:.0f}ms)")
+        print(f"[Stage 2] Parallel: external={len(external_answer)}ch local={len(local_prefetch)}ch ({parallel_ms:.0f}ms)")
 
         if blocked or not external_answer:
-            t0 = time.time()
-            final_answer = await local_provider.generate_async_messages(main_messages) or ""
-            timings["local_ms"] = (time.time() - t0) * 1000
-            print(f"[Stage 2] Fallback to local: {len(final_answer)} chars")
+            # External failed — use already-computed local prefetch (free, no extra call)
+            final_answer = local_prefetch
+            timings["local_ms"] = 0.0  # already captured in local_prefetch_ms
+            print(f"[Stage 2] Fallback to local prefetch: {len(final_answer)} chars")
+        elif not _is_satisfying(external_answer):
+            # Stage 3 agent: external answer is a refusal or too vague → use local prefetch
+            final_answer = local_prefetch
+            timings["local_ms"] = 0.0
+            log_event(trace_id, "stage3_agent", raw_input=external_answer[:120],
+                      raw_output="use_local", provider="local", latency_ms=0)
+            print(f"[Stage 3] Agent: external unsatisfying → using local prefetch ({len(final_answer)} chars)")
         else:
             # Strip leading disclaimer/warning paragraphs the external model may have injected.
             # A paragraph is considered a "warning" if it contains refusal or privacy language
@@ -323,7 +356,7 @@ class RelayOrchestrator:
             "final_answer": final_answer,
             "steps": {
                 "reformulated_query": external_query,
-                "local_answer": None,
+                "local_prefetch": local_prefetch,
                 "external_answer": external_answer,
             },
             "provider": self.config.external_provider,
