@@ -6,3 +6,7 @@ logs/
 .venv/
 *.egg-info/
 .DS_Store
+eval/results/response_cache.json
+eval/results/*.jsonl
+eval/.env
+
