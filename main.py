@@ -4,6 +4,7 @@ Usage:
     uvicorn main:app --host 0.0.0.0 --port 8000
 """
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -17,10 +18,21 @@ from source.auth.router import router as auth_router
 
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: nothing extra needed (clients are lazy-initialized)
+    yield
+    # Shutdown: close persistent HTTP clients
+    orch: RelayOrchestrator = app.state.orchestrator
+    await orch.ollama.aclose()
+
+
 app = FastAPI(
     title="Zipsa",
-    version="0.4.0",
+    version="0.4.1",
     description="Privacy-preserving hybrid AI gateway",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

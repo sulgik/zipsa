@@ -10,6 +10,25 @@ class OllamaClient:
         self.host = (host or os.getenv("LOCAL_HOST", "http://localhost:11434")).rstrip("/")
         # API key for hosted Ollama endpoints (e.g. Ollama Cloud, custom deployments)
         self.api_key = api_key or os.getenv("LOCAL_API_KEY", "")
+        # Persistent HTTP client — reused across all calls to avoid TCP connection overhead
+        self._client: httpx.AsyncClient | None = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Return (or lazily create) a persistent AsyncClient for this host."""
+        if self._client is None or self._client.is_closed:
+            limits = httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+                keepalive_expiry=60,
+            )
+            self._client = httpx.AsyncClient(timeout=600.0, limits=limits)
+        return self._client
+
+    async def aclose(self) -> None:
+        """Close the persistent client (call on app shutdown)."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
 
     def _is_openai_compatible(self) -> bool:
         """Detect if host is OpenAI-compatible (OpenRouter, vLLM, etc.) vs native Ollama.
@@ -19,7 +38,12 @@ class OllamaClient:
         ollama_indicators = ["localhost", "127.0.0.1", "11434", "ollama.com/api", "host.docker.internal"]
         return not any(x in self.host for x in ollama_indicators)
 
-    async def chat(self, messages: List[Dict[str, str]], temperature: float = 0.5) -> str:
+    async def chat(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.5,
+        max_tokens: int | None = None,
+    ) -> str:
         if self._is_openai_compatible():
             # OpenAI-compatible endpoint (OpenRouter, vLLM, etc.)
             url = f"{self.host}/chat/completions"
@@ -29,19 +53,22 @@ class OllamaClient:
                 "temperature": temperature,
                 "stream": False,
             }
+            if max_tokens is not None:
+                payload["max_tokens"] = max_tokens
             headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
             response_path = lambda result: result["choices"][0]["message"]["content"]
         else:
             # Native Ollama API
             url = f"{self.host}/api/chat"
+            options: Dict[str, Any] = {"temperature": temperature}
+            if max_tokens is not None:
+                options["num_predict"] = max_tokens
             payload = {
                 "model": self.model,
                 "messages": messages,
                 "stream": False,
                 "think": False,
-                "options": {
-                    "temperature": temperature
-                }
+                "options": options,
             }
             headers = {"Content-Type": "application/json"}
             if self.api_key:
@@ -49,13 +76,16 @@ class OllamaClient:
             response_path = lambda result: result["message"]["content"]
 
         try:
-            async with httpx.AsyncClient(timeout=600.0) as client:
-                response = await client.post(url, json=payload, headers=headers)
-                response.raise_for_status()
-                result = response.json()
-                return response_path(result).strip()
+            client = await self._get_client()
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            result = response.json()
+            return response_path(result).strip()
         except Exception as e:
             print(f"[Ollama Error] {e}")
+            # Reset client on connection errors so next call gets a fresh one
+            if isinstance(e, (httpx.ConnectError, httpx.RemoteProtocolError)):
+                self._client = None
             return ""
 
     async def semantic_sanitize_en(self, text: str) -> str:  # kept for reference / experiments
@@ -179,7 +209,8 @@ Now reformulate this query:"""
         if conversation_context:
             messages.extend(conversation_context)
         messages.append({"role": "user", "content": text})
-        raw = await self.chat(messages, temperature=0.1)
+        # max_tokens=256: reformulated query is always a single short JSON object
+        raw = await self.chat(messages, temperature=0.1, max_tokens=256)
 
         try:
             clean = _re.sub(r"```(?:json)?", "", raw).strip().strip("`").strip()

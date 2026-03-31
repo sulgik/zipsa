@@ -25,9 +25,20 @@ Policy invariants enforced by Validator:
 
 from __future__ import annotations
 
+import hashlib
 import re
+import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
+
+
+# ── LRU cache for LLM classification results ──────────────────────────────────
+# Key: SHA-256 of the redacted query (no PII). Value: (result_dict, timestamp).
+# Avoids repeated LLM round-trips for queries with the same structural pattern.
+_CLASSIFY_CACHE: OrderedDict = OrderedDict()
+_CLASSIFY_CACHE_MAX = 256   # entries
+_CLASSIFY_CACHE_TTL = 300   # seconds (5 min)
 
 from source.relay.router import (
     compute_pii_sensitivity,
@@ -602,15 +613,30 @@ async def _classify_llm(query: str, ollama_client) -> Optional[Dict[str, str]]:
 
     Security fields (injection_risk, exfiltration_risk, crisis_risk) are NOT
     delegated to the LLM — they are always computed deterministically in classify().
+    Results are LRU-cached by redacted-query fingerprint to skip redundant LLM calls.
     """
     import json as _json
     import re as _re
 
+    redacted = _redact_for_classifier(query)
+
+    # ── Cache lookup ──────────────────────────────────────────────────────────
+    cache_key = hashlib.sha256(redacted.encode()).hexdigest()
+    if cache_key in _CLASSIFY_CACHE:
+        result, ts = _CLASSIFY_CACHE[cache_key]
+        if time.monotonic() - ts < _CLASSIFY_CACHE_TTL:
+            _CLASSIFY_CACHE.move_to_end(cache_key)   # LRU bump
+            print(f"[Stage 1] LLM classifier cache HIT ({cache_key[:8]})")
+            return result
+        else:
+            del _CLASSIFY_CACHE[cache_key]
+
     messages = [
         {"role": "system", "content": _LLM_CLASSIFY_PROMPT.strip()},
-        {"role": "user", "content": _redact_for_classifier(query)},
+        {"role": "user", "content": redacted},
     ]
-    raw = await ollama_client.chat(messages, temperature=0.0)
+    # max_tokens=80: JSON classifier output is always short ({"task_type":..., ...})
+    raw = await ollama_client.chat(messages, temperature=0.0, max_tokens=80)
     if not raw:
         return None
     try:
@@ -641,7 +667,15 @@ async def _classify_llm(query: str, ollama_client) -> Optional[Dict[str, str]]:
             raise ValueError(f"unknown decision: {decision!r}")
         if reason_code not in _VALID_REASON_CODES:
             reason_code = "needs_external_knowledge" if decision == "hybrid" else "sufficient_local_context"
-        return {"task_type": task_type, "decision": decision, "reason_code": reason_code}
+        result = {"task_type": task_type, "decision": decision, "reason_code": reason_code}
+
+        # ── Cache store ───────────────────────────────────────────────────────
+        _CLASSIFY_CACHE[cache_key] = (result, time.monotonic())
+        _CLASSIFY_CACHE.move_to_end(cache_key)
+        if len(_CLASSIFY_CACHE) > _CLASSIFY_CACHE_MAX:
+            _CLASSIFY_CACHE.popitem(last=False)   # evict oldest
+
+        return result
     except Exception as e:
         print(f"[LLM Classify Error] {e} | raw={raw[:120]}")
         return None

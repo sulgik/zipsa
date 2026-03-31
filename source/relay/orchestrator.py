@@ -22,25 +22,13 @@ PROVIDERS = {
 # Stage 3: local LLM applies the external answer back to the original personal context.
 # Uses placeholder-based grounding: external LLM sees [NAME_1], [PHONE_1] etc.
 # Local LLM restores real values and delivers a personalized final answer.
-LOCAL_PROMPT = """You are the final step of a local privacy gateway. The external model answered an anonymized version of the query using placeholders (e.g. [NAME_1], [PHONE_1]). Your job is to restore the real values and deliver a personalized final answer.
+LOCAL_PROMPT = """Restore placeholders in the external answer using the mapping below. Reply in the same language as the original question. No disclaimers.
 
-ORIGINAL QUESTION (with real personal details):
-{original_query}
+Original: {original_query}
+Mapping: {binding_table}
+External answer: {external_answer}
 
-PLACEHOLDER MAPPING (placeholder → real value, local only):
-{binding_table}
-
-EXTERNAL ANSWER (uses placeholders, not real values):
-{external_answer}
-
-INSTRUCTIONS:
-1. Replace every placeholder in the external answer with the corresponding real value from the mapping above.
-2. If the external answer refers generically to "the patient", "a patient", "the user", "the client", or similar, replace those references with the real name found in the ORIGINAL QUESTION (e.g. "John D.") where it reads naturally. Do not use placeholder names — use the actual name from the original question.
-3. Do not surface raw identifiers like SSNs, credit card numbers, or account numbers — refer to them naturally (e.g. "your account").
-4. Strip any privacy warnings, disclaimers, or security notices that the external model may have added. Output ONLY the substantive answer.
-5. Respond in the SAME LANGUAGE as the original question.
-
-Write the final grounded answer now (no warnings, no disclaimers):"""
+Final answer:"""
 
 
 def _is_satisfying(answer: str) -> bool:
@@ -357,9 +345,8 @@ class RelayOrchestrator:
                     external_answer=external_answer,
                 )
                 final_answer = await self.ollama.chat(
-                    [{"role": "system", "content": local_prompt},
-                     {"role": "user", "content": "Write the final answer now."}],
-                    temperature=0.35,
+                    [{"role": "user", "content": local_prompt}],
+                    temperature=0.0,
                 ) or external_answer
             timings["local_ms"] = (time.time() - t0) * 1000
             log_event(trace_id, "local_synthesis", raw_input=f"ext={external_answer[:100]}",
