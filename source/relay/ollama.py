@@ -194,8 +194,8 @@ Reformulation rules:
 4. Reformulate as a follow-up to the sanitized conversation history (if any).
 
 EXAMPLES:
-Input:  "Jane Smith (SSN 123-45-6789) is a senior ER physician. Her patient's HbA1c worsened 7.8→8.4% over 6 months on metformin 2000mg + sitagliptin 100mg (eGFR 62). Next treatment options?"
-Output: {"reformulated": "A patient in their late 50s with T2DM. HbA1c worsening 7.8→8.4% over 6 months. Current regimen: metformin 2000mg + DPP-4i (sitagliptin 100mg), eGFR 62. Rank the top escalation strategies with expected HbA1c reduction, renal dosing requirements, and monitoring needs."}
+Input:  "My patient John K. (DOB 03/15/1966, MRN 445892) has been on metformin 2000mg + sitagliptin 100mg for 6 months. HbA1c worsened 7.8→8.4%, eGFR 62. What are the escalation options for his T2DM?"
+Output: {"reformulated": "A healthcare professional (physician) asks about a patient in their late 50s with T2DM. HbA1c worsening 7.8→8.4% over 6 months on current regimen: metformin 2000mg + DPP-4i (sitagliptin 100mg), eGFR 62. Rank the top escalation strategies with expected HbA1c reduction, renal dosing requirements, and monitoring needs."}
 
 Input:  "John Smith (john@acme.com) is our CTO. Why are our AWS Lambda cold starts over 3s with a 512MB Node.js function?"
 Output: {"reformulated": "AWS Lambda cold starts exceeding 3 seconds with a 512MB Node.js function. What are the top causes and ranked mitigation strategies?"}
@@ -276,8 +276,8 @@ FOR HYBRID — reformulation rules:
 4. Reformulate as a follow-up to the sanitized conversation history above (if any).
 
 EXAMPLES:
-Input:  "Jane Smith (SSN 123-45-6789) is a senior ER physician. Her patient's HbA1c worsened 7.8→8.4% over 6 months on metformin 2000mg + sitagliptin 100mg (eGFR 62). Next treatment options?"
-Output: {"route": "hybrid", "reformulated": "A patient in their late 50s with T2DM. HbA1c worsening 7.8→8.4% over 6 months. Current regimen: metformin 2000mg + DPP-4i (sitagliptin 100mg), eGFR 62. Rank the top escalation strategies with expected HbA1c reduction, renal dosing requirements, and monitoring needs."}
+Input:  "My patient John K. (DOB 03/15/1966, MRN 445892) has been on metformin 2000mg + sitagliptin 100mg for 6 months. HbA1c worsened 7.8→8.4%, eGFR 62. What are the escalation options for his T2DM?"
+Output: {"route": "hybrid", "reformulated": "A healthcare professional (physician) asks about a patient in their late 50s with T2DM. HbA1c worsening 7.8→8.4% over 6 months on current regimen: metformin 2000mg + DPP-4i (sitagliptin 100mg), eGFR 62. Rank the top escalation strategies with expected HbA1c reduction, renal dosing requirements, and monitoring needs."}
 
 Input:  "John Smith (john@acme.com) is our CTO. Why are our AWS Lambda cold starts over 3s with a 512MB Node.js function?"
 Output: {"route": "hybrid", "reformulated": "AWS Lambda cold starts exceeding 3 seconds with a 512MB Node.js function. What are the top causes and ranked mitigation strategies? For each: expected latency improvement and implementation complexity."}
