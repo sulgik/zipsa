@@ -412,13 +412,9 @@ Tokens are kept in memory by default. Set `TOKEN_ENCRYPTION_KEY` to persist them
 
 ## License
 
-**Business Source License 1.1 (BSL 1.1)**
+**MIT License** — free for personal and commercial use.
 
-- 🟢 **Free for:** Personal use, research, open-source projects, evaluation
-- 🔴 **Commercial use:** Requires a paid license
-- 📅 **Change date:** 2029-03-12 — then it automatically becomes Apache 2.0
-
-Questions? Email: [sulgik@gmail.com](mailto:sulgik@gmail.com)
+See [LICENSE](LICENSE) for details. Questions? Email: [sulgik@gmail.com](mailto:sulgik@gmail.com)
 
 ---
 
