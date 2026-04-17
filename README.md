@@ -9,6 +9,8 @@
 **TL;DR:** Drop Zipsa between your app and any LLM. It detects sensitive data, rewrites your prompt to remove it, calls the cloud model, and re-applies the answer to your original context. You get cloud-quality answers without exposing raw personal or internal data.
 
 [![CI](https://github.com/sulgik/zipsa/actions/workflows/ci.yml/badge.svg)](https://github.com/sulgik/zipsa/actions/workflows/ci.yml)
+![Version](https://img.shields.io/badge/version-0.4.1-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 ![OpenAI Compatible](https://img.shields.io/badge/api-openai--compatible-0a7f5a)
 ![Ollama](https://img.shields.io/badge/local%20llm-Ollama-222222)
 
