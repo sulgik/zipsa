@@ -112,7 +112,7 @@ This way you get privacy *and* continuity.
 
 Ran on 100 real conversations — medical, legal, finance, security, internal ops.
 
-**65% less risk than cloud. 5 points better than local.**
+**80% less risk than cloud. 5 points better than local.**
 
 Privacy risk indexed to cloud = 100:
 
@@ -121,7 +121,7 @@ Privacy risk indexed to cloud = 100:
 |  | Privacy risk | Answer quality |
 |--|--|--|
 | Send everything (cloud) | 100 | 79 / 100 |
-| **Zipsa** | **35** | **78 / 100** |
+| **Zipsa** | **20** | **78 / 100** |
 | Never send anything (local) | 0 | 73 / 100 |
 
 ```mermaid
@@ -129,7 +129,7 @@ xychart-beta
     title "Privacy risk (bar, cloud=100) vs Answer quality (line, /100)"
     x-axis ["Cloud-direct", "Zipsa", "Local-only"]
     y-axis "Score" 0 --> 100
-    bar [100, 35, 0]
+    bar [100, 20, 0]
     line [79, 78, 73]
 ```
 
@@ -137,8 +137,8 @@ xychart-beta
 
 The bar collapses. The line barely moves.
 
-**vs. cloud-direct:** privacy risk cut by 65%. Quality: −1 point.
-**vs. local-only:** quality up 5 points. You give up only 35 on the privacy index.
+**vs. cloud-direct:** privacy risk cut by 80%. Quality: −1 point.
+**vs. local-only:** quality up 5 points. You give up only 20 on the privacy index.
 
 There used to be a forced choice: cloud AI meant your data left your hands; local AI meant worse answers. Zipsa dissolves it — near-cloud quality, near-local privacy.
 
