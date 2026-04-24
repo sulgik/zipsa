@@ -1,17 +1,4 @@
 services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: zipsa-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama-models:/root/.ollama
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-
   zipsa:
     build: .
     container_name: zipsa
@@ -20,13 +7,10 @@ services:
     env_file:
       - .env
     environment:
-      - LOCAL_HOST=http://ollama:11434   # points to the bundled Ollama service
+      - LOCAL_HOST=http://host.docker.internal:11434
+      - OLLAMA_HOST=http://host.docker.internal:11434
     volumes:
       - ./logs:/app/logs
       - ./data:/app/data
-    depends_on:
-      ollama:
-        condition: service_healthy
-
-volumes:
-  ollama-models:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
